@@ -12,7 +12,7 @@
 
 #include <nvhe/gfp.h>
 #include <nvhe/spinlock.h>
-enum g2g_share_status {EMPTY, INITIATED, COMPLETED};
+enum g2g_share_status {EMPTY, INITIATED, COMPLETED, OWNER_UNSHARED, BORROWER_ONSHARED};
 struct guest2guest_share {
 	pkvm_handle_t initiator_handle;
 	pkvm_handle_t completer_handle;
@@ -21,7 +21,7 @@ struct guest2guest_share {
 	u32	page_nr;
 	phys_addr_t phys;
 	enum g2g_share_status status;
-	u8 dummy[2048];
+	u8 dummy[1024];
 	struct guest2guest_share *next;
 };
 /*

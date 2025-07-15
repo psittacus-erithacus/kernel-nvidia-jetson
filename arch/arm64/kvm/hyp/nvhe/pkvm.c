@@ -1738,7 +1738,7 @@ pkvm_handle_t find_next_g2g_share(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t targ
 
 int pkvm_g2g_share_init(struct pkvm_hyp_vcpu *vcpu, u64 ipa, u64 *phys);
 int pkvm_g2g_share_complete(struct pkvm_hyp_vcpu *vcpu, u64 ipa, u64 phys);
-int __pkvm_g2g_unshare(struct pkvm_hyp_vcpu *vcpu, u64 ipa);
+int __pkvm_g2g_unshare(struct pkvm_hyp_vm *vm, u64 ipa);
 static int handle_g2g_share_initiator(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *target_handle, pkvm_handle_t *handle,
 		u32 page_nr, u64 ipa ,u64 *exit_code)
 {
@@ -1746,23 +1746,25 @@ static int handle_g2g_share_initiator(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *targe
 	struct guest2guest_share *share = g2g_share;
 
 	int err = 0;
-
+	int tmp = 10;
 	new_share = hyp_alloc(sizeof(struct guest2guest_share));
 	hyp_print("new_share %llx\n",new_share);
 	if (new_share) {
 		memset(new_share, 0, sizeof(struct guest2guest_share));
 		if (g2g_share) {
-			share = g2g_share;
+			//share = g2g_share;
 			hyp_print("share %llx share->next %llx\n",share,share->next);
 			while (share->next) {
-				//hyp_print("tst %x\n",p->page_nr);
+				hyp_print("find latest %lx\n",share);
 				share = share->next;
+				if (tmp-- == 0)
+					return 0;
 			}
 			//share->next = new_share;
 			//hyp_print("set share_next %llx\n",new_share);
-		} else {
-			hyp_print("init hyp_vm %llx\n",new_share);
-			g2g_share = new_share;
+		//} else {
+		//	hyp_print("init hyp_vm %llx\n",new_share);
+		//	g2g_share = new_share;
 		}
 		hyp_print("OK1\n");
 		err = pkvm_g2g_share_init(hyp_vcpu, ipa,  &new_share->phys);
@@ -1785,8 +1787,12 @@ static int handle_g2g_share_initiator(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *targe
 			new_share->initiator_ipa = ipa;
 			new_share->status = INITIATED;
 			hyp_print("set share_next %llx\n",new_share);
-			if (share)
+			if (g2g_share)
 				share->next = new_share;
+			else {
+				hyp_print("init hyp_vm %llx\n",new_share);
+				g2g_share = new_share;
+			}
 		}
 		break;
 	case -EFAULT:
@@ -1845,14 +1851,14 @@ static bool pkvm_guest_to_guest_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_
 	u64 ipa = smccc_get_arg1(vcpu);
 	u32 page_nr = smccc_get_arg2(vcpu);
 	u64 target_handle = smccc_get_arg3(vcpu);
-	bool initiator = smccc_get_arg4(vcpu);
+	bool owner = smccc_get_arg4(vcpu);
 	pkvm_handle_t handle = hyp_vm->kvm.arch.pkvm.handle;
 	int ret = SMCCC_RET_SUCCESS;
 	bool share_completed = false;
 	dbg = 1;
-	hyp_print("pkvm_test_call %llx target %x h:%x %x %x\n",ipa,target_handle,handle, page_nr,g2g_share );
+	hyp_print("pkvm_test_call %llx target %x h:%x page:%x %x\n",ipa,target_handle,handle, page_nr,owner);
 
-	if (!initiator) {
+	if (!owner) {
 		if (!handle_g2g_share_completer(hyp_vcpu, &handle, page_nr, ipa))
 			share_completed = true;
 			//goto out_guest;
@@ -1934,6 +1940,11 @@ static bool pkvm_guest_to_guest_query(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_
 	return true;
 }
 #if 1
+int stage2_update_leaf_attrs(struct kvm_pgtable *pgt, u64 addr,
+				    u64 size, kvm_pte_t attr_set,
+				    kvm_pte_t attr_clr, kvm_pte_t *orig_pte,
+				    u32 *level, enum kvm_pgtable_walk_flags flags);
+
 static bool pkvm_g2g_unshare(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 {
 	struct pkvm_hyp_vm *hyp_vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
@@ -1957,25 +1968,48 @@ static bool pkvm_g2g_unshare(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 			if (((ipa == 0) || (ipa == share->initiator_ipa)) &&
 			    ((target_handle == 0) ||
 			     (target_handle == share->completer_handle))) {
-				hyp_print("unshare completer %x\n",share->completer_handle);
+				hyp_print("owner unshare %x\n",share->completer_handle);
 				vm = get_vm_by_handle(share->completer_handle);
-				hyp_print("cvm %llx\n",vm);
+				hyp_print("owner vm %llx\n",vm);
 				ipa = share->completer_ipa;
+				/*_----------------- */
+				 enum kvm_pgtable_walk_flags flags;
+				u32 level;
+					kvm_pte_t set = 0, clr = 0;
+					clr = KVM_PTE_LEAF_ATTR_LO_S2_S2AP_R | KVM_PTE_LEAF_ATTR_LO_S2_S2AP_W;
+					ret = stage2_update_leaf_attrs(&vm->pgt, ipa, 1, set, clr, NULL, &level, flags);
+					hyp_print("update_addr ret %d\n",ret);
+					//if (!ret)
+					//	kvm_call_hyp(__kvm_tlb_flush_vmid_ipa_nsh, vm->pgt.mmu, ipa, level);
+
+					//hyp_print("update_addr done\n");
+			} else {
+				hyp_print("continue\n");
+				next_share = share->next;
+				goto cont;
 			}
 		} else if (handle == share->completer_handle) {
 			hyp_print("x2 s_ipa: %lx s_handle %x\n",share->completer_ipa,share->initiator_handle);
 			if (((ipa == 0) || (ipa == share->completer_ipa)) &&
 			    ((target_handle == 0) ||
 			    (target_handle == share->initiator_handle))) {
-				hyp_print("unshare initiator %x\n",share->initiator_handle);
+				hyp_print("unshare borrower %x\n",share->initiator_handle);
 				vm = hyp_vm;
+				ret = __pkvm_g2g_unshare(vm, ipa);
+
+
+			} else {
+				hyp_print("continue\n");
+				next_share = share->next;
+				goto cont;
 			}
 		} else {
 			hyp_print("unshare err\n");
 			WARN_ON(1);
 		}
-		hyp_print("unmap ipa %lx\n",ipa);
-		ret = __pkvm_g2g_unshare(hyp_vcpu, ipa);
+		hyp_print("unmap ipa %lx %llx\n",ipa,vm);
+/*
+		share datan voi poistaa vasta kun molemmat puolet on unsharetettu
 		//pitää olla completer ipam jos vm.kin on completer
 		//ret = kvm_pgtable_stage2_unmap(&vm->pgt, ipa, 4096);
 		if (prev_share) {
@@ -1991,7 +2025,8 @@ static bool pkvm_g2g_unshare(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 		hyp_print("free %llx\n",share);
 		hyp_free(share);
 		hyp_print("free done\n");
-
+		*/
+cont:
 		share = g2g_share_search_by_handle(next_share, handle, handle, &prev_share);
 	}
 	dbg = 0;

@@ -2179,10 +2179,10 @@ int pkvm_g2g_share_complete(struct pkvm_hyp_vcpu *vcpu, u64 ipa, u64 phys)
 
 	return ret;
 }
-int __pkvm_g2g_unshare(struct pkvm_hyp_vcpu *vcpu, u64 ipa)
+int __pkvm_g2g_unshare(struct pkvm_hyp_vm *vm, u64 ipa)
 {
 	int ret;
-	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(vcpu);
+	//struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(vcpu);
 	/*struct pkvm_mem_transition share = {
 		.nr_pages	= nr_pages,
 		.initiator	= {
