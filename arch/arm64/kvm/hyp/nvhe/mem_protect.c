@@ -2057,6 +2057,7 @@ int __pkvm_host_share_hyp(u64 pfn)
 
 	return ret;
 }
+int pkvm_init_g2g_share(u64 p, u64 nr_pages);
 
 int __pkvm_guest_share_host(struct pkvm_hyp_vcpu *vcpu, u64 ipa, u64 nr_pages,
 			    u64 *nr_shared)
@@ -2091,8 +2092,26 @@ int __pkvm_guest_share_host(struct pkvm_hyp_vcpu *vcpu, u64 ipa, u64 nr_pages,
 }
 
 /**/
+int pkvm_init_g2g_pool(u64 p, u64 nr_pages);
 
 //struct pkvm_hyp_vm *stat_vm;
+int __pkvm_init_g2g_share_buffer(u64 pfn, u64 nr_pages)
+{
+	u64 host_addr = hyp_pfn_to_phys(pfn);
+	u64 hyp_addr = (u64)__hyp_va(host_addr);
+	int ret;
+	hyp_print("init share %llx %llx\n",pfn, nr_pages);
+	hyp_print("init share2 %llx %llx\n",host_addr, hyp_addr);
+	ret =  ___pkvm_host_donate_hyp(pfn, nr_pages, false);
+	//ret =  __pkvm_host_share_hyp(pfn);
+	//ret |=  ___pkvm_host_donate_hyp(pfn, 1, true);
+	hyp_print("init share ret  %x\n",ret);
+	if (ret)
+		return ret;
+
+	ret = pkvm_init_g2g_pool(hyp_addr, nr_pages);
+	return ret;
+}
 
 int pkvm_g2g_share_init(struct pkvm_hyp_vcpu *vcpu, u64 ipa, u64 *phys)
 {
