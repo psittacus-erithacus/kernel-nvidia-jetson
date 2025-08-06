@@ -2113,7 +2113,7 @@ int __pkvm_init_g2g_share_buffer(u64 pfn, u64 nr_pages)
 	return ret;
 }
 
-int pkvm_g2g_share_init(struct pkvm_hyp_vcpu *vcpu, u64 ipa, u64 *phys)
+int pkvm_g2g_share_check(struct pkvm_hyp_vcpu *vcpu, u64 ipa)
 {
 	int ret;
 	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(vcpu);
@@ -2141,7 +2141,7 @@ int pkvm_g2g_share_init(struct pkvm_hyp_vcpu *vcpu, u64 ipa, u64 *phys)
 		.nr_pages	= 0,
 	};
 	ret = guest_request_share(&checked_tx);
-	*phys = checked_tx.completer_addr;
+	//*phys = checked_tx.completer_addr;
 	//hyp_print("__pkvm_guest_share_guest done  %llx %x\n", *phys, ret);
 
 	dbg = 0;
