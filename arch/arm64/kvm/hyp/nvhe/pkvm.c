@@ -1701,7 +1701,7 @@ int pkvm_init_g2g_pool(u64 p, u64 nr_pages)
 
 //ruct guest_shared_mem gshare[MAX_GUEST_SHARE_COUNT];
 extern int dbg;
-int get_new_share_id(void)
+int get_new_share(void)
 {
 	int i;
 	struct g2g_share *share;
@@ -1709,6 +1709,7 @@ int get_new_share_id(void)
 		share = &(*g2g_pool.shares)[i];
 		if ((share->completer_handle == 0) &&
 		    (share->initiator_handle == 0)) {
+			hyp_print("get_new %d\n",i);
 			return i;
 			//return share;
 		}
@@ -1720,11 +1721,12 @@ struct g2g_share  *g2g_share_search_by_handle(int *id,
 						  pkvm_handle_t completer)
 
 {
+	int i;
 #if 1
 	struct g2g_share *share;
 	hyp_print("g2g_share_search_handle %lx\n",share);
 	hyp_print("look for %x and %x\n",initiator, completer);
-	for (i = id; i < g2g_pool.nr_pages; i++) {
+	for (i = *id; i < g2g_pool.nr_pages; i++) {
 		share = &(*g2g_pool.shares)[i];
 		hyp_print("i: %x c: %x\n",share->initiator_handle,share->completer_handle);
 
@@ -1775,18 +1777,27 @@ pkvm_handle_t find_next_g2g_share(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t targ
 
 }
 
-int pkvm_g2g_share_check(struct pkvm_hyp_vcpu *vcpu, u64 ipa, u64);
+int pkvm_g2g_share_check(struct pkvm_hyp_vcpu *vcpu, u64 ipa);
 int pkvm_g2g_share_complete(struct pkvm_hyp_vcpu *vcpu, u64 ipa, u64 phys);
 int __pkvm_g2g_unshare(struct pkvm_hyp_vm *vm, u64 ipa);
 
-static int do_g2g_shahe(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa, u64 phys)
+static phys_addr_t get_share_phys(int id) {
+	hyp_print("get_phys id %d phys %llx\n", id, hyp_virt_to_phys(g2g_pool.pages + 4096 * id));
+	return hyp_virt_to_phys(g2g_pool.pages + 4096 * id);
+}
+
+static int do_g2g_shahe(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa, phys_addr_t phys)
 {
 	int ret = 0;
 
 	ret = pkvm_g2g_share_check(hyp_vcpu, ipa);
-	hyp_print("get phys %llx -> %llx %x\n",ipa,  get_share_phys(id), ret);
+	hyp_print("do_share ipa:%llx -> phys. %llx %x\n",ipa,  phys, ret);
+	if (ret == -EFAULT) {
+		hyp_print("the page is not mapped\n");
+		ret = 0;
+	}
 	if (!ret)
-		ret = pkvm_g2g_share_complete(hyp_vcpu, ipa, get_share_phys(id));
+		ret = pkvm_g2g_share_complete(hyp_vcpu, ipa, phys);
 
 	return ret;
 }
@@ -1794,7 +1805,7 @@ static int do_g2g_shahe(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa, u64 phys)
 static int handle_g2g_share_initiator(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *target_handle, pkvm_handle_t *handle,
 		u32 page_nr, u64 ipa ,u64 *exit_code)
 {
-#if 1
+#if 0
 	struct g2g_share *new_share = 0;// = guest2guest_share;
 	struct g2g_share *share = g2g_shares;
 	int id;
@@ -1818,7 +1829,7 @@ static int handle_g2g_share_initiator(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *targe
 	switch (err) {
 	case 0:
 		hyp_print("set vmid %x/%x %llx -> %llx \n",*target_handle, page_nr,ipa, new_share->phys);
-		id = get_new_share_id();
+		id = get_new_share();
 		if (id < 0)
 			return -EINVAL;
 		hyp_print("new_share %d\n",id);
@@ -1857,7 +1868,7 @@ static int handle_g2g_share_initiator(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *targe
 }
 static int handle_g2g_share_completer(struct pkvm_hyp_vcpu *hyp_vcpu, pkvm_handle_t *handle, u32 page_nr, u64 ipa)
 {
-#if 1
+#if 0
 	struct g2g_share *share = g2g_shares;
 	int ret;
 
@@ -1888,7 +1899,7 @@ static bool pkvm_guest_to_guest_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_
 	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
 	u64 ipa = smccc_get_arg1(vcpu);
 	u32 page_nr = smccc_get_arg2(vcpu);
-	u64 target_handle = smccc_get_arg3(vcpu);
+	u64 partner = smccc_get_arg3(vcpu);
 	bool owner = smccc_get_arg4(vcpu);
 	pkvm_handle_t handle = hyp_vm->kvm.arch.pkvm.handle;
 	int ret = SMCCC_RET_SUCCESS;
@@ -1897,14 +1908,18 @@ static bool pkvm_guest_to_guest_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_
 	int share_id = 0;
 	int err;
 
-	hyp_print("pkvm_test_call %llx target %x h:%x page:%x %x\n",ipa,target_handle,handle, page_nr,owner);
+	hyp_print("pkvm_test_call ipa:%llx part: %x handle: %x page:%x %x\n",ipa,partner,handle, page_nr,owner);
 	struct g2g_share *share;
 
-	share = g2g_share_search_by_handle(&share_id, target_handle, 0);
+	share = g2g_share_search_by_handle(&share_id, partner, handle);
 	while (share) {
-		if ((share->status == INITIATED)  &&
-		    (share->completer_handle == 0) && (share->page_nr == page_nr)) {
+		if ((share->status == INITIATED)  && (share->page_nr == page_nr)) {
+			hyp_print("complete share %d phys:%llx\n",share_id, get_share_phys(share_id));
 			ret =  do_g2g_shahe(hyp_vcpu, ipa, get_share_phys(share_id));
+			if (ret == -EFAULT) {
+				hyp_print("the page is not mapped\n");
+				ret = 0;
+			}
 			if (!ret) {
 				share->completer_ipa = ipa;
 				share->status = COMPLETED;
@@ -1912,20 +1927,26 @@ static bool pkvm_guest_to_guest_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_
 			}
 			break;
 		}
-		share = g2g_share_search_by_handle(&share_id, target_handle, 0);
+		share_id++;
+		share = g2g_share_search_by_handle(&share_id, partner, 0);
 	}
 
 	if (!share) {
 		ret = do_g2g_shahe(hyp_vcpu, ipa, get_share_phys(share_id));
+		if (ret == -EFAULT) {
+			hyp_print("the page is not mapped\n");
+			ret = 0;
+		}
+		//hyp_print("initiate share %d\n",ret);
 		if (!ret) {
-			share_id = get_new_share_id();
+			share_id = get_new_share();
 			if (share_id < 0)
 				return -EINVAL;
-			hyp_print("new_share %d\n",share_id);
+			hyp_print("initiate new_share_id %d phys:%llx\n",share_id, get_share_phys(share_id));
 			share = &(*g2g_pool.shares)[share_id];
-			share->completer_handle = *target_handle;
+			share->completer_handle = partner;
 			share->page_nr = page_nr;
-			share->initiator_handle = *handle;
+			share->initiator_handle = handle;
 			share->initiator_ipa = ipa;
 			share->status = INITIATED;
 			share_completed = true;
@@ -1934,19 +1955,10 @@ static bool pkvm_guest_to_guest_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_
 	}
 	if (ret) {
 		hyp_print("fail\n");
-		err = hyp_alloc_errno();
+		//err = hyp_alloc_errno();
 	}
 
-		ret = handle_g2g_share_initiator(hyp_vcpu, &target_handle, &handle, page_nr, ipa, exit_code);
-		if (ret) {
-			if (ret > 0) {
-				hyp_print("back to the host\n");
-				return false;
-			}
-			 else
-				 ret = SMCCC_RET_INVALID_PARAMETER;
-		}
-	}
+
 	hyp_print("pkvm_test_call OK\n");
 	smccc_set_retval(vcpu, ret, share_completed, 0, 0);
 	dbg = 0;
@@ -1965,7 +1977,8 @@ static bool pkvm_guest_to_guest_query(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_
 
 	pkvm_handle_t handle = hyp_vm->kvm.arch.pkvm.handle;
 	struct g2g_share *share = 0;
-
+	int share_id = 0;
+	int i;
 	//struct kvm_hyp_req *req;
 	u32 owned_waiting = 0;
 	u32 owned_completed = 0;
@@ -1976,9 +1989,9 @@ static bool pkvm_guest_to_guest_query(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_
 	//int err;
 
 	hyp_print("pkvm_test2_call\n");
-	if (target_handle)
-		share = g2g_share_search_by_handle(g2g_shares, target_handle, handle, 0);
-	while (share) {
+//	if (target_handle)
+//		share = g2g_share_search_by_handle(&share_id, target_handle, handle, 0);
+	for (i = share_id; i < g2g_pool.nr_pages; i++) {
 		if (share->completer_handle == handle) {
 			if (share->completer_ipa) {
 				owned_completed++;
@@ -1999,7 +2012,7 @@ static bool pkvm_guest_to_guest_query(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_
 			if (share->status == INITIATED)
 				owned_waiting++;
 		}
-		share = g2g_share_search_by_handle(share->next, 0, handle, 0);
+		//share = g2g_share_search_by_handle(share->next, 0, handle, 0);
 
 	}
 	owned = (u64) owned_completed << 32 | owned_waiting;
