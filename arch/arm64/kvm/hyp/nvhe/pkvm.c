@@ -1707,14 +1707,29 @@ int get_new_share(void)
 	struct g2g_share *share;
 	for (i = 0; i < g2g_pool.nr_pages; i++) {
 		share = &(*g2g_pool.shares)[i];
-		if ((share->completer_handle == 0) &&
-		    (share->initiator_handle == 0)) {
+		if (share->status == EMPTY) {
 			hyp_print("get_new %d\n",i);
 			return i;
 			//return share;
 		}
 	}
 	return -1;
+}
+
+int check_g2g_share(struct g2g_share *share,
+		    pkvm_handle_t handle, pkvm_handle_t partner,
+		    u64 ipa)
+{
+	if (share->initiator_handle == handle)
+		if ((!ipa) || (share->initiator_ipa == ipa))
+			if ((!partner) || (share->completer_handle == partner))
+				return 1;
+	if (share->completer_handle == handle)
+		if ((!ipa) || (share->completer_ipa == ipa))
+			if ((!partner) || (share->initiator_handle == partner))
+				return 2;
+	 return 0;
+
 }
 struct g2g_share  *g2g_share_search_by_handle(int *id,
 						  pkvm_handle_t initiator,
@@ -1803,96 +1818,7 @@ static int do_g2g_shahe(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa, phys_addr_t phy
 	return ret;
 }
 
-static int handle_g2g_share_initiator(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *target_handle, pkvm_handle_t *handle,
-		u32 page_nr, u64 ipa ,u64 *exit_code)
-{
-#if 0
-	struct g2g_share *new_share = 0;// = guest2guest_share;
-	struct g2g_share *share = g2g_shares;
-	int id;
-	int ret;
 
-	int err = 0;
-	//int tmp = 10;
-	//new_share = hyp_alloc(sizeof(struct g2g_share));
-
-	ret = pkvm_g2g_share_check(hyp_vcpu, ipa);
-	hyp_print("get phys %llx -> %llx %x\n",ipa,  get_share_phys(id), ret);
-	if (!ret)
-		ret = pkvm_g2g_share_complete(hyp_vcpu, ipa, get_share_phys(id));
-	if (ret) {
-		hyp_print("fail\n");
-		err = hyp_alloc_errno();
-	}
-
-	hyp_print("pkvm_test_call err %x\n",err);
-
-	switch (err) {
-	case 0:
-		hyp_print("set vmid %x/%x %llx -> %llx \n",*target_handle, page_nr,ipa, new_share->phys);
-		id = get_new_share();
-		if (id < 0)
-			return -EINVAL;
-		hyp_print("new_share %d\n",id);
-		new_share = &(*g2g_pool.shares)[id];
-		new_share->completer_handle = *target_handle;
-		new_share->page_nr = page_nr;
-		new_share->initiator_handle = *handle;
-		new_share->initiator_ipa = ipa;
-		new_share->status = INITIATED;
-		break;
-	case -EFAULT:
-		/* the page that the guest want to share is not mapped to the guest */
-		 hyp_print("EFAULT\n");
-		 if (new_share) {
-	//		 if (share)
-	//			 share->next = 0;
-			 hyp_print("free %llx\n",new_share);
-			 hyp_free(new_share);
-		 }
-		 map_guest_page(hyp_vcpu, exit_code, ipa);
-		 hyp_print("EFAULT done\n");
-		 /* return to the host */
-		 return 1;
-	 case -ENOMEM:
-		 hyp_print("ENOMEM: try to allocate more memory from the host\n");
-
-		 if (allocate_more_memory_from_host(hyp_vcpu, exit_code)) {
-			hyp_print("out_guest_err ENOMEM\n");
-			return -1;
-		}
-		 /* return to the host */
-		 return 1;
-	}
-#endif
-	return 0;
-}
-static int handle_g2g_share_completer(struct pkvm_hyp_vcpu *hyp_vcpu, pkvm_handle_t *handle, u32 page_nr, u64 ipa)
-{
-#if 0
-	struct g2g_share *share = g2g_shares;
-	int ret;
-
-	share = g2g_share_search_by_handle(share, 0, *handle, 0);
-		while (share) {
-			hyp_print("found %llx  vmid: %x ipa: %x nr: %x\n", share, share->completer_handle,
-				share->completer_ipa, share->page_nr);
-
-			if ((share->status == INITIATED) &&
-			   (share->page_nr == page_nr)) {
-				ret = pkvm_g2g_share_complete(hyp_vcpu, ipa, share->phys);
-				if (!ret) {
-					share->completer_ipa = ipa;
-					share->status = COMPLETED;
-					hyp_print("pkvm_g2g_share_complete OK\n");
-					return 0;
-				};
-			}
-			share = g2g_share_search_by_handle(share->next, 0, *handle, 0);
-		}
-#endif
-		return 1;
-}
 static bool pkvm_guest_to_guest_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 {
 #if 1
@@ -2035,88 +1961,55 @@ int stage2_update_leaf_attrs(struct kvm_pgtable *pgt, u64 addr,
 
 static bool pkvm_g2g_unshare(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 {
-#if 0
+#if 1
 	struct pkvm_hyp_vm *hyp_vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
 	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
 	pkvm_handle_t handle = hyp_vm->kvm.arch.pkvm.handle;
-	struct pkvm_hyp_vm *vm = 0;
-	struct g2g_share *share = g2g_share;
-	struct g2g_share *prev_share  = 0;
-	struct g2g_share *next_share  = 0;
+	//struct pkvm_hyp_vm *vm = 0;
+	struct g2g_share *share;;
+	int share_id = 0;
+
 	dbg = 1;
 	u64 ipa = smccc_get_arg1(vcpu);
-	u64 target_handle = smccc_get_arg2(vcpu);
+	u64 tmp_ipa = 0;
+	pkvm_handle_t partner = smccc_get_arg2(vcpu);
 	int ret = 0;
-	hyp_print("pkvm_g2g_unshare v: %x i:%llx\n",target_handle, ipa);
-	share = g2g_share_search_by_handle(share, handle, handle, &prev_share);
-	while (share) {
-		hyp_print("h %x ih %x\n", handle, share->initiator_handle);
-		if (handle == share->initiator_handle) {
-			hyp_print("ipa %lx <> %lx \n",ipa,share->initiator_ipa);
-			hyp_print("vmid %x <> %x \n",target_handle,share->completer_handle);
-			if (((ipa == 0) || (ipa == share->initiator_ipa)) &&
-			    ((target_handle == 0) ||
-			     (target_handle == share->completer_handle))) {
-				hyp_print("owner unshare %x\n",share->completer_handle);
-				vm = get_vm_by_handle(share->completer_handle);
-				hyp_print("owner vm %llx\n",vm);
-				ipa = share->completer_ipa;
-				/*_----------------- */
-				 enum kvm_pgtable_walk_flags flags;
-				u32 level;
-					kvm_pte_t set = 0, clr = 0;
-					clr = KVM_PTE_LEAF_ATTR_LO_S2_S2AP_R | KVM_PTE_LEAF_ATTR_LO_S2_S2AP_W;
-					ret = stage2_update_leaf_attrs(&vm->pgt, ipa, 1, set, clr, NULL, &level, flags);
-					hyp_print("update_addr ret %d\n",ret);
-					//if (!ret)
-					//	kvm_call_hyp(__kvm_tlb_flush_vmid_ipa_nsh, vm->pgt.mmu, ipa, level);
+	hyp_print("pkvm_g2g_unshare i:%x c: %x ipa: %llx\n", handle, partner, ipa);
+	//share = g2g_share_search_by_handle(&share_id, handle, handle);
+	for (share_id = 0; share_id < g2g_pool.nr_pages; share_id++) {
+		share = &(*g2g_pool.shares)[share_id];
+		hyp_print("check %d\n",check_g2g_share(share, handle, partner, ipa));
+		switch (check_g2g_share(share, handle, partner, ipa)) {
+		case 1:
+			//share->initiator_handle = 0;
+			tmp_ipa = share->initiator_ipa;
+			share->initiator_ipa = 0;
+			if (share->status == COMP_UNSHARED)
+				share->status = EMPTY;
+			else
+				share->status = INIT_UNSHARED;
+			break;
 
-					//hyp_print("update_addr done\n");
-			} else {
-				hyp_print("continue\n");
-				next_share = share->next;
-				goto cont;
+		case 2:
+			//share->completer_handle = 0;
+			tmp_ipa = share->completer_ipa;
+			share->completer_ipa = 0;
+			if (share->status == INIT_UNSHARED)
+				share->status = EMPTY;
+			else
+				share->status = COMP_UNSHARED;
+			break;
+		}
+		if (tmp_ipa) {
+			hyp_print("unmap ipa %lx %x\n",tmp_ipa,handle);
+			ret = __pkvm_g2g_unshare(hyp_vm, tmp_ipa);
+			tmp_ipa = 0;
+			hyp_print("unmap ret %x\n",ret);
+			if (ipa) {
+				hyp_print("stop unmap\n");
+				break;
 			}
-		} else if (handle == share->completer_handle) {
-			hyp_print("x2 s_ipa: %lx s_handle %x\n",share->completer_ipa,share->initiator_handle);
-			if (((ipa == 0) || (ipa == share->completer_ipa)) &&
-			    ((target_handle == 0) ||
-			    (target_handle == share->initiator_handle))) {
-				hyp_print("unshare borrower %x\n",share->initiator_handle);
-				vm = hyp_vm;
-				ret = __pkvm_g2g_unshare(vm, ipa);
-
-
-			} else {
-				hyp_print("continue\n");
-				next_share = share->next;
-				goto cont;
-			}
-		} else {
-			hyp_print("unshare err\n");
-			WARN_ON(1);
 		}
-		hyp_print("unmap ipa %lx %llx\n",ipa,vm);
-/*
-		share datan voi poistaa vasta kun molemmat puolet on unsharetettu
-		//pitää olla completer ipam jos vm.kin on completer
-		//ret = kvm_pgtable_stage2_unmap(&vm->pgt, ipa, 4096);
-		if (prev_share) {
-			hyp_print("remove share %d %llx\n",share->page_nr, share);
-			prev_share->next = share->next;
-			next_share = share->next;
-		}
-		else {
-			hyp_print("reset g2g_share to %d %llx (->) %llx\n", share->page_nr, share , share->next);
-			g2g_share =  share->next;
-			next_share = g2g_share;
-		}
-		hyp_print("free %llx\n",share);
-		hyp_free(share);
-		hyp_print("free done\n");
-		*/
-cont:
-		share = g2g_share_search_by_handle(next_share, handle, handle, &prev_share);
 	}
 	dbg = 0;
 #endif

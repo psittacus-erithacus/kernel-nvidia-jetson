@@ -12,7 +12,7 @@
 
 #include <nvhe/gfp.h>
 #include <nvhe/spinlock.h>
-enum g2g_share_status {EMPTY, INITIATED, COMPLETED, OWNER_UNSHARED, BORROWER_ONSHARED};
+enum g2g_share_status {EMPTY = 0, INITIATED, COMPLETED, INIT_UNSHARED, COMP_UNSHARED};
 struct g2g_share {
 	pkvm_handle_t initiator_handle;
 	pkvm_handle_t completer_handle;
