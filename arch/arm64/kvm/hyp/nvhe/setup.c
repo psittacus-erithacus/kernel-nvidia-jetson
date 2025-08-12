@@ -23,8 +23,11 @@
 
 unsigned long hyp_nr_cpus;
 
-phys_addr_t pvmfw_base;
+phys_addr_t ;
 phys_addr_t pvmfw_size;
+phys_addr_t pvmfw_base;
+phys_addr_t g2g_share_base;
+phys_addr_t g2g_share_size;
 
 #define hyp_percpu_size ((unsigned long)__per_cpu_end - \
 			 (unsigned long)__per_cpu_start)
@@ -93,6 +96,8 @@ int xdummy(int r) {
 	return r;
 }
 */
+int pkvm_init_g2g_pool(u64 p, u64 nr_pages);
+
 static int recreate_hyp_mappings(phys_addr_t phys, unsigned long size,
 				 unsigned long *per_cpu_base,
 				 u32 hyp_va_bits)
@@ -170,8 +175,15 @@ static int recreate_hyp_mappings(phys_addr_t phys, unsigned long size,
 	end = start + pvmfw_size;
 	prot = pkvm_mkstate(PAGE_HYP_RO, PKVM_PAGE_OWNED);
 	ret = pkvm_create_mappings(start, end, prot);
-
-	//while(xx);
+	if (g2g_share_size) {
+		start = hyp_phys_to_virt(g2g_share_base);
+		end = start + g2g_share_size;
+		prot = pkvm_mkstate(PAGE_HYP, PKVM_PAGE_OWNED);
+		//ret = pkvm_create_mappings(start, end, prot);
+		ret = pkvm_create_mappings(start, end, PAGE_HYP);
+		pkvm_init_g2g_pool(start, g2g_share_size/4096);
+	}
+//while(xx);
 	//ret = xdummy(ret);
 	if (ret)
 		return ret;

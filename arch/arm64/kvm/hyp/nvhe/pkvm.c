@@ -31,6 +31,8 @@ unsigned int kvm_arm_vmid_bits;
 unsigned int kvm_sve_max_vl;
 
 unsigned int kvm_host_sve_max_vl;
+struct g2g_pool g2g_pool;
+//struct g2g_share *g2g_shares = 0;
 
 /*
  * The currently loaded hyp vCPU for each physical CPU. Used only when
@@ -853,7 +855,7 @@ int __pkvm_init_vm(struct kvm *host_kvm, unsigned long pgd_hva)
 		ret = -EINVAL;
 		goto err_unpin_kvm;
 	}
-	hyp_print("init1 \n");
+	hyp_print("init_vm %llx, %llx \n",g2g_pool.shares, hyp_phys_to_virt(pvmfw_base));
 
 	hyp_vm = hyp_alloc_account(pkvm_get_hyp_vm_size(nr_vcpus),
 				   host_kvm);
@@ -928,7 +930,7 @@ int __pkvm_init_vcpu(pkvm_handle_t handle, struct kvm_vcpu *host_vcpu)
 		ret = -ENOENT;
 		goto unlock_vm;
 	}
-	hyp_print("pvminit1 %llx \n", __pkvm_init_vcpu);
+	hyp_print("pvminitvcpu %llx %llx\n", g2g_pool.shares, hyp_phys_to_virt(pvmfw_base));
 
 	hyp_vcpu = hyp_alloc_account(sizeof(*hyp_vcpu), hyp_vm->host_kvm);
 
@@ -1678,23 +1680,35 @@ struct guest_share_data {
 } *guest_share = 0;
 #endif
 
-struct g2g_pool g2g_pool;
-struct g2g_share *g2g_shares = 0;
+u64 tmp = 0;
+u64 tmp2;
 int pkvm_init_g2g_pool(u64 p, u64 nr_pages)
 {
-	int hdr_pages = DIV_ROUND_UP(sizeof(struct g2g_share) * nr_pages + sizeof(u32), 4096);
-
-	hyp_print("sharepool %llx %d %x\n",p, nr_pages,nr_pages);
-	if (hdr_pages >= nr_pages)
-		return -EINVAL;
-	memset((void *) p, 0, nr_pages * 4096);
-	g2g_pool.shares = (struct g2g_share(*)[]) p;
+	tmp = p;
+	tmp2 = nr_pages;
+	return 0;
+}
+int pkvm_init_g2g_pool2(void)
+{
+	int hdr_pages;
+	u64 p =  tmp;
+	u64 nr_pages = tmp2;
+	if (g2g_pool.shares == 0) {
+		hdr_pages = DIV_ROUND_UP(sizeof(struct g2g_share) * nr_pages + sizeof(u32), 4096);
+	//p = 0x000800000032000;
+		hyp_print("sharepool %llx  %lld\n", tmp,nr_pages);
+	//p = hyp_phys_to_virt(p);
+		if (hdr_pages >= nr_pages)
+			return -EINVAL;
+		memset((void *) p, 0, 4096);
+	//memcpy(p,tmp,4);
+		g2g_pool.shares = (struct g2g_share(*)[]) p;
 	//g2g_pool.shares = (struct g2g_share *) p;
-	g2g_pool.nr_pages = nr_pages - hdr_pages;
-	g2g_pool.pages = (void *) p + hdr_pages * 4096;
-	hyp_print("mem pages %d\n",g2g_pool.nr_pages);
-	hyp_print("mem %llx\n",g2g_pool.pages);
-
+		g2g_pool.nr_pages = nr_pages - hdr_pages;
+		g2g_pool.pages = (void *) p + hdr_pages * 4096;
+		hyp_print("mem pages %d\n",g2g_pool.nr_pages);
+		hyp_print("mem %llx\n",g2g_pool.pages);
+	}
 	return 0;
 }
 
@@ -1906,7 +1920,7 @@ static bool pkvm_guest_to_guest_query(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_
 	pkvm_handle_t handle = hyp_vm->kvm.arch.pkvm.handle;
 	struct g2g_share *share = 0;
 	int share_id = 0;
-
+	pkvm_init_g2g_pool2();
 	//struct kvm_hyp_req *req;
 	u32 owned_waiting = 0;
 	u32 owned_completed = 0;

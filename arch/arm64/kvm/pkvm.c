@@ -37,6 +37,8 @@ DEFINE_STATIC_KEY_FALSE(kvm_protected_mode_initialized);
 static struct reserved_mem *pkvm_firmware_mem;
 static phys_addr_t *pvmfw_base = &kvm_nvhe_sym(pvmfw_base);
 static phys_addr_t *pvmfw_size = &kvm_nvhe_sym(pvmfw_size);
+static phys_addr_t *g2g_share_base = &kvm_nvhe_sym(g2g_share_base);
+static phys_addr_t *g2g_share_size = &kvm_nvhe_sym(g2g_share_size);
 
 static struct pkvm_moveable_reg *moveable_regs = kvm_nvhe_sym(pkvm_moveable_regs);
 static struct memblock_region *hyp_memory = kvm_nvhe_sym(hyp_memory);
@@ -590,15 +592,43 @@ static int __init pkvm_firmware_rmem_init(struct reserved_mem *rmem)
 
 	if (!PAGE_ALIGNED(rmem->size))
 		return pkvm_firmware_rmem_err(rmem, "size is not page-aligned");
+	kvm_err("ppkvm_firmware_rmem_init %x %x\n",rmem->base,rmem->size);
 
 	*pvmfw_size = rmem->size;
 	*pvmfw_base = rmem->base;
 	pkvm_firmware_mem = rmem;
 	return 0;
 }
-RESERVEDMEM_OF_DECLARE(pkvm_firmware, "linux,pkvm-guest-firmware-memory",
+RESERVEDMEM_OF_DECLARE(qq, "linux,pkvm-guest-firmware-memory",
 		       pkvm_firmware_rmem_init);
 
+static int __init pkvm_g2g_share_rmem_init(struct reserved_mem *rmem)
+{
+	unsigned long node = rmem->fdt_node;
+/*
+	if (pkvm_firmware_mem)
+		return pkvm_firmware_rmem_err(rmem, "duplicate reservation");
+
+	if (!of_get_flat_dt_prop(node, "no-map", NULL))
+		return pkvm_firmware_rmem_err(rmem, "missing \"no-map\" property");
+
+	if (of_get_flat_dt_prop(node, "reusable", NULL))
+		return pkvm_firmware_rmem_err(rmem, "\"reusable\" property unsupported");
+*/
+	kvm_err("pkvm_g2g_share_rmem_init %x %x\n",rmem->base,rmem->size);
+	if (!PAGE_ALIGNED(rmem->base))
+		return pkvm_firmware_rmem_err(rmem, "base is not page-aligned");
+
+	if (!PAGE_ALIGNED(rmem->size))
+		return pkvm_firmware_rmem_err(rmem, "size is not page-aligned");
+
+	*g2g_share_size = rmem->size;
+	*g2g_share_base = rmem->base;
+	//pkvm_firmware_mem = rmem;
+	return 0;
+}
+RESERVEDMEM_OF_DECLARE(pkvm_firmware, "linux,pkvm-guest-shared-memory",
+		       pkvm_g2g_share_rmem_init);
 static int __init pkvm_firmware_rmem_clear(void)
 {
 	void *addr;
