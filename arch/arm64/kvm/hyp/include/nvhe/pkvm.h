@@ -19,16 +19,16 @@ struct g2g_share {
 	unsigned long initiator_ipa;
 	unsigned long completer_ipa;
 	u32	page_nr;
-	phys_addr_t phys;
+	//phys_addr_t phys;
 	enum g2g_share_status status;
 	//u8 dummy[1024];
-	struct g2g_share *next;
+	//struct g2g_share *next;
 };
 
 struct g2g_pool {
 	struct g2g_share (*shares)[];
 	u32 nr_pages;
-	void  *pages;
+	void  *shared_mem;
 };
 /*
  * Holds the relevant data for maintaining the vcpu state completely at hyp.

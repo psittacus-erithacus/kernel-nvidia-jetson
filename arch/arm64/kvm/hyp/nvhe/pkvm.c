@@ -21,7 +21,8 @@
 #include <nvhe/rwlock.h>
 #include <nvhe/trap_handler.h>
 #include <nvhe/hyp_print.h>
-
+extern phys_addr_t g2g_share_base;
+extern phys_addr_t g2g_share_size;
 /* Used by icache_is_vpipt(). */
 unsigned long __icache_flags;
 
@@ -1457,6 +1458,7 @@ static int pkvm_handle_empty_memcache(struct pkvm_hyp_vcpu *hyp_vcpu,
 
 	return 0;
 }
+/*
 static int allocate_more_memory_from_host(struct pkvm_hyp_vcpu *hyp_vcpu,
 				      u64 *exit_code)
 {
@@ -1495,6 +1497,7 @@ static int map_guest_page(struct pkvm_hyp_vcpu *hyp_vcpu,
 
 	return 0;
 }
+*/
 static bool pkvm_memshare_call(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 {
 	struct pkvm_hyp_vm *hyp_vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
@@ -1691,24 +1694,23 @@ int pkvm_init_g2g_pool(u64 p, u64 nr_pages)
 int pkvm_init_g2g_pool2(void)
 {
 	int hdr_pages;
-	u64 p =  tmp;
-	u64 nr_pages = tmp2;
-	if (g2g_pool.shares == 0) {
-		hdr_pages = DIV_ROUND_UP(sizeof(struct g2g_share) * nr_pages + sizeof(u32), 4096);
-	//p = 0x000800000032000;
-		hyp_print("sharepool %llx  %lld\n", tmp,nr_pages);
+	hyp_print("pkvm_init_g2g_pool2\n");
+	void *p = hyp_phys_to_virt(g2g_share_base);
+	int nr_pages = g2g_share_size / 4096;
+
+	hdr_pages = DIV_ROUND_UP(sizeof(struct g2g_share) * nr_pages + sizeof(u32), 4096);
+	hyp_print("sharepool %d\n", nr_pages);
 	//p = hyp_phys_to_virt(p);
-		if (hdr_pages >= nr_pages)
-			return -EINVAL;
-		memset((void *) p, 0, 4096);
-	//memcpy(p,tmp,4);
-		g2g_pool.shares = (struct g2g_share(*)[]) p;
+	if (hdr_pages >= nr_pages)
+		return -EINVAL;
+
+	memset((void *) p, 0, g2g_share_size);
+	g2g_pool.shares = (struct g2g_share(*)[]) p;
 	//g2g_pool.shares = (struct g2g_share *) p;
-		g2g_pool.nr_pages = nr_pages - hdr_pages;
-		g2g_pool.pages = (void *) p + hdr_pages * 4096;
-		hyp_print("mem pages %d\n",g2g_pool.nr_pages);
-		hyp_print("mem %llx\n",g2g_pool.pages);
-	}
+	g2g_pool.nr_pages = nr_pages - hdr_pages;
+	g2g_pool.shared_mem = (void *) p + hdr_pages * 4096;
+	hyp_print("mem pages %d\n",g2g_pool.nr_pages);
+	hyp_print("share: %llx mem %llx\n",g2g_pool.shares, g2g_pool.shared_mem);
 	return 0;
 }
 
@@ -1719,6 +1721,8 @@ int get_new_share(void)
 {
 	int i;
 	struct g2g_share *share;
+	if (!g2g_pool.shares)
+		pkvm_init_g2g_pool2();
 	for (i = 0; i < g2g_pool.nr_pages; i++) {
 		share = &(*g2g_pool.shares)[i];
 		if (share->status == EMPTY) {
@@ -1753,6 +1757,9 @@ struct g2g_share  *g2g_share_search_by_handle(int *id,
 	int i;
 #if 1
 	struct g2g_share *share = 0;
+	if (!g2g_pool.shares)
+		return 0;
+
 	hyp_print("g2g_share_search_handle %d\n",*id);
 	hyp_print("look for %x and %x\n",initiator, completer);
 	for (i = *id; i < g2g_pool.nr_pages; i++) {
@@ -1812,8 +1819,8 @@ int pkvm_g2g_share_complete(struct pkvm_hyp_vcpu *vcpu, u64 ipa, u64 phys);
 int __pkvm_g2g_unshare(struct pkvm_hyp_vm *vm, u64 ipa);
 
 static phys_addr_t get_share_phys(int id) {
-	hyp_print("get_phys id %d phys %llx\n", id, hyp_virt_to_phys(g2g_pool.pages + 4096 * id));
-	return hyp_virt_to_phys(g2g_pool.pages + 4096 * id);
+	hyp_print("get_phys id %d phys %llx\n", id, hyp_virt_to_phys(g2g_pool.shared_mem + 4096 * id));
+	return hyp_virt_to_phys(g2g_pool.shared_mem + 4096 * id);
 }
 
 static int do_g2g_shahe(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa, phys_addr_t phys)
@@ -1847,7 +1854,6 @@ static bool pkvm_guest_to_guest_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_
 	bool share_completed = false;
 	dbg = 1;
 	int share_id = 0;
-	int err;
 
 	hyp_print("guest_share  ipa:%llx part: %x handle: %x page:%x %x\n",ipa,partner,handle, page_nr,owner);
 	struct g2g_share *share;
@@ -1873,6 +1879,9 @@ static bool pkvm_guest_to_guest_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_
 	}
 
 	if (!share) {
+		share_id = get_new_share();
+		if (share_id < 0)
+			return -EINVAL;
 		hyp_print("initiate share %d phys:%llx\n",share_id, get_share_phys(share_id));
 		ret = do_g2g_shahe(hyp_vcpu, ipa, get_share_phys(share_id));
 		if (ret == -EFAULT) {
@@ -1881,9 +1890,7 @@ static bool pkvm_guest_to_guest_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_
 		}
 		//hyp_print("initiate share %d\n",ret);
 		if (!ret) {
-			share_id = get_new_share();
-			if (share_id < 0)
-				return -EINVAL;
+
 			hyp_print("initiate new_share_id %d phys:%llx\n",share_id, get_share_phys(share_id));
 			share = &(*g2g_pool.shares)[share_id];
 			share->completer_handle = partner;

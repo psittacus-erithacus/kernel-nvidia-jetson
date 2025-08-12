@@ -179,9 +179,10 @@ static int recreate_hyp_mappings(phys_addr_t phys, unsigned long size,
 		start = hyp_phys_to_virt(g2g_share_base);
 		end = start + g2g_share_size;
 		prot = pkvm_mkstate(PAGE_HYP, PKVM_PAGE_OWNED);
-		//ret = pkvm_create_mappings(start, end, prot);
-		ret = pkvm_create_mappings(start, end, PAGE_HYP);
-		pkvm_init_g2g_pool(start, g2g_share_size/4096);
+		ret = pkvm_create_mappings(start, end, prot);
+		//ret = pkvm_create_mappings(start, end, PAGE_HYP);
+		//while(g2g_share_size);
+		//pkvm_init_g2g_pool(start, g2g_share_size/4096);
 	}
 //while(xx);
 	//ret = xdummy(ret);
