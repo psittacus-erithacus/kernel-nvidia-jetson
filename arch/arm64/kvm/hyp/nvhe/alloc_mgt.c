@@ -8,7 +8,6 @@
 #include <nvhe/alloc.h>
 #include <nvhe/alloc_mgt.h>
 #include <nvhe/iommu.h>
-#include <nvhe/hyp_print.h>
 
 static struct hyp_mgt_allocator_ops *registered_allocators[] = {
 	[HYP_ALLOC_MGT_HEAP_ID] = &hyp_alloc_ops,
@@ -20,7 +19,6 @@ static struct hyp_mgt_allocator_ops *registered_allocators[] = {
 int hyp_alloc_mgt_refill(unsigned long id, struct kvm_hyp_memcache *host_mc)
 {
 	struct hyp_mgt_allocator_ops *ops;
-	//hyp_print("hyp_alloc_mgt_refill\n");
 
 	if (id > MAX_ALLOC_ID)
 		return -EINVAL;
@@ -38,7 +36,6 @@ int hyp_alloc_mgt_reclaimable(void)
 	int reclaimable = 0;
 	int i;
 
-	//hyp_print("hyp_alloc_mgt_reclaimable\n");
 	for (i = 0 ; i < MAX_ALLOC_ID ; ++i) {
 		ops = registered_allocators[i];
 		if (ops->reclaimable)
@@ -51,7 +48,6 @@ void hyp_alloc_mgt_reclaim(struct kvm_hyp_memcache *host_mc, int target)
 {
 	struct hyp_mgt_allocator_ops *ops;
 	int i;
-	//hyp_print("hyp_alloc_mgt_reclaim\n");
 
 	for (i = 0 ; (i < MAX_ALLOC_ID) && (host_mc->nr_pages < target) ; ++i) {
 		ops = registered_allocators[i];

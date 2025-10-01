@@ -24,7 +24,6 @@
 #include <nvhe/modules.h>
 #include <nvhe/mm.h>
 #include <nvhe/pkvm.h>
-#include <nvhe/hyp_print.h>
 #include <nvhe/trace/trace.h>
 #include <nvhe/trap_handler.h>
 
@@ -206,7 +205,6 @@ static void handle_pvm_entry_hvc64(struct pkvm_hyp_vcpu *hyp_vcpu)
 {
 	u32 fn = smccc_get_function(&hyp_vcpu->vcpu);
 
-	//hyp_print("entry hypcall %x\n",fn);
 	switch (fn) {
 	case ARM_SMCCC_VENDOR_HYP_KVM_MEM_SHARE_FUNC_ID:
 		fallthrough;
@@ -1613,17 +1611,7 @@ static void handle___pkvm_stage2_snapshot(struct kvm_cpu_context *host_ctxt)
 	cpu_reg(host_ctxt, 0) = SMCCC_RET_NOT_SUPPORTED;
 #endif
 }
-int __pkvm_init_g2g_share_buffer(u64 p, u64 nr_pages);
 
-static void handle___pkvm_init_g2g_share_buffer(struct kvm_cpu_context *host_ctxt)
-{
-
-	DECLARE_REG(u64, phys, host_ctxt, 1);
-	DECLARE_REG(u64, nr_pages, host_ctxt, 2);
-
-	cpu_reg(host_ctxt, 1) = __pkvm_init_g2g_share_buffer(phys, nr_pages);
-
-}
 typedef void (*hcall_t)(struct kvm_cpu_context *);
 
 #define HANDLE_FUNC(x)	[__KVM_HOST_SMCCC_FUNC_##x] = (hcall_t)handle_##x
@@ -1689,7 +1677,6 @@ static const hcall_t host_hcall[] = {
 	HANDLE_FUNC(__pkvm_host_iommu_iova_to_phys),
 	HANDLE_FUNC(__pkvm_host_hvc_pd),
 	HANDLE_FUNC(__pkvm_stage2_snapshot),
-	HANDLE_FUNC(__pkvm_init_g2g_share_buffer),
 };
 
 static void handle_host_hcall(struct kvm_cpu_context *host_ctxt)
@@ -1718,7 +1705,7 @@ static void handle_host_hcall(struct kvm_cpu_context *host_ctxt)
 
 	if (unlikely(id < hcall_min || id >= ARRAY_SIZE(host_hcall)))
 		goto inval;
-	//hyp_print("hcall %lx\n",id)
+
 	hfn = host_hcall[id];
 	if (unlikely(!hfn))
 		goto inval;
@@ -1730,7 +1717,6 @@ end:
 
 	return;
 inval:
-	hyp_print("hcall err\n");
 	trace_host_hcall(id, 1);
 	cpu_reg(host_ctxt, 0) = SMCCC_RET_NOT_SUPPORTED;
 }

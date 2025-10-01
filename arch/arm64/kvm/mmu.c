@@ -254,20 +254,10 @@ static void kvm_host_put_page(void *addr)
 {
 	put_page(virt_to_page(addr));
 }
-extern int dbg;
-int hyp_print(const char *fmt, ...);
 
 static void kvm_s2_put_page(void *addr)
 {
-	if (dbg) {
-		while(dbg)
-			hyp_print("s2put\n");
-//		kvm_err("s2put\n")
-
-	}
 	struct page *p = virt_to_page(addr);
-	if (dbg)
-		hyp_print("s2put %llx\n",p);
 	/* Dropping last refcount, the page will be freed */
 	if (page_count(p) == 1)
 		kvm_account_pgtable_pages(addr, -1);
@@ -1038,7 +1028,6 @@ int kvm_init_stage2_mmu(struct kvm *kvm, struct kvm_s2_mmu *mmu, unsigned long t
 		return -ENOMEM;
 
 	mmu->arch = &kvm->arch;
-	kvm_err("hihi\n");
 	err = kvm_pgtable_stage2_init(pgt, mmu, &kvm_s2_mm_ops,
 				      &kvm_s2_pte_ops);
 	if (err)

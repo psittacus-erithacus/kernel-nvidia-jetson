@@ -10,7 +10,6 @@
 #include <linux/bitfield.h>
 #include <asm/kvm_pgtable.h>
 #include <asm/stage2_pgtable.h>
-//#include <nvhe/hyp_print.h>
 
 
 #define KVM_PTE_LEAF_ATTR_S2_PERMS	(KVM_PTE_LEAF_ATTR_LO_S2_S2AP_R | \
@@ -373,11 +372,7 @@ static int hyp_set_prot_attr(enum kvm_pgtable_prot prot, kvm_pte_t *ptep)
 
 	return 0;
 }
-__attribute__((weak))
-int hyp_print(const char *fmt, ...)
-{
-	return 0;
-}
+
 enum kvm_pgtable_prot kvm_pgtable_hyp_pte_prot(kvm_pte_t pte)
 {
 	enum kvm_pgtable_prot prot = pte & KVM_PTE_LEAF_ATTR_HI_SW;
@@ -813,7 +808,6 @@ static bool stage2_try_break_pte(const struct kvm_pgtable_visit_ctx *ctx,
 
 	return true;
 }
-int dbg = 0;
 
 static void stage2_make_pte(const struct kvm_pgtable_visit_ctx *ctx, kvm_pte_t new)
 {
@@ -821,9 +815,10 @@ static void stage2_make_pte(const struct kvm_pgtable_visit_ctx *ctx, kvm_pte_t n
 	struct kvm_pgtable_pte_ops *pte_ops = ctx->pte_ops;
 
 	WARN_ON(!stage2_pte_is_locked(*ctx->ptep));
-	if (pte_ops->pte_is_counted_cb(new, ctx->level)) {
+
+	if (pte_ops->pte_is_counted_cb(new, ctx->level))
 		mm_ops->get_page(ctx->ptep);
-	}
+
 	smp_store_release(ctx->ptep, new);
 }
 
@@ -866,7 +861,6 @@ static void stage2_unmap_put_pte(const struct kvm_pgtable_visit_ctx *ctx,
 	 * valid. Depending on the system support, defer the TLB maintenance
 	 * for the same until the entire unmap walk is completed.
 	 */
-
 	stage2_unmap_clear_pte(ctx, mmu);
 	mm_ops->put_page(ctx->ptep);
 }
@@ -1298,6 +1292,7 @@ int kvm_pgtable_stage2_put_pages(struct kvm_pgtable *pgt, u64 addr, u64 size)
 
 	return kvm_pgtable_walk(pgt, addr, size, &walker);
 }
+
 static int stage2_unmap_walker(const struct kvm_pgtable_visit_ctx *ctx,
 			       enum kvm_pgtable_walk_flags visit)
 {
@@ -1307,6 +1302,7 @@ static int stage2_unmap_walker(const struct kvm_pgtable_visit_ctx *ctx,
 	struct kvm_pgtable_mm_ops *mm_ops = ctx->mm_ops;
 	kvm_pte_t *childp = NULL;
 	bool need_flush = false;
+
 	if (!kvm_pte_valid(ctx->old)) {
 		if (pte_ops->pte_is_counted_cb(ctx->old, ctx->level)) {
 			kvm_clear_pte(ctx->ptep);
@@ -1333,13 +1329,14 @@ static int stage2_unmap_walker(const struct kvm_pgtable_visit_ctx *ctx,
 		stage2_unmap_put_pte(ctx, mmu, mm_ops);
 	else
 		stage2_unmap_clear_pte(ctx, mmu);
+
 	if (need_flush && mm_ops->dcache_clean_inval_poc)
 		mm_ops->dcache_clean_inval_poc(kvm_pte_follow(ctx->old, mm_ops),
 					       kvm_granule_size(ctx->level));
 
-	if (childp) {
+	if (childp)
 		mm_ops->put_page(childp);
-	}
+
 	return 0;
 }
 
@@ -1461,7 +1458,7 @@ static int stage2_attr_walker(const struct kvm_pgtable_visit_ctx *ctx,
 	return 0;
 }
 
-int stage2_update_leaf_attrs(struct kvm_pgtable *pgt, u64 addr,
+static int stage2_update_leaf_attrs(struct kvm_pgtable *pgt, u64 addr,
 				    u64 size, kvm_pte_t attr_set,
 				    kvm_pte_t attr_clr, kvm_pte_t *orig_pte,
 				    u32 *level, enum kvm_pgtable_walk_flags flags)

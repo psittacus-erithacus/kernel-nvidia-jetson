@@ -13,6 +13,7 @@ hyp-obj-$(CONFIG_LIST_HARDENED) += list_debug.o
 hyp-obj-$(CONFIG_TRACING) += clock.o events.o trace.o
 hyp-obj-$(CONFIG_MODULES) += modules.o
 hyp-obj-$(CONFIG_PKVM_VENDOR_MODULE_OPS) += module_dbg_tools.o
+hyp-obj-$(CONFIG_PKVM_GUEST_TO_GUEST_SHARE) += pkvm_g2g_share.o
 hyp-obj-y += $(lib-objs)
 
 #Only for built-in, not modules
@@ -32,11 +33,3 @@ $(obj)/hyp.lds: $(src)/hyp.lds.S FORCE
 
 include $(srctree)/arch/arm64/kvm/hyp/nvhe/Makefile.nvhe
 obj-y := kvm_nvhe.o
-KCSAN_SANITIZE := n
-
-extra-y += debug/dummy.o debug/el2.bin
-LDFLAGS_el2.bin :=  -Map=el2.map -T
-$(obj)/debug/el2.bin: $(obj)/debug/hyp-dbg.lds $(addprefix $(obj)/,$(hyp-obj) ) $(obj)/debug/dummy.o FORCE
-#$(obj)/debug/el2.bin: $(obj)/hyp.lds $(addprefix $(obj)/,$(hyp-obj) ) $(obj)/debug/dummy.o FORCE
-	$(call if_changed,ld)
-

@@ -37,9 +37,10 @@ DEFINE_STATIC_KEY_FALSE(kvm_protected_mode_initialized);
 static struct reserved_mem *pkvm_firmware_mem;
 static phys_addr_t *pvmfw_base = &kvm_nvhe_sym(pvmfw_base);
 static phys_addr_t *pvmfw_size = &kvm_nvhe_sym(pvmfw_size);
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
 static phys_addr_t *g2g_share_base = &kvm_nvhe_sym(g2g_share_base);
 static phys_addr_t *g2g_share_size = &kvm_nvhe_sym(g2g_share_size);
-
+#endif
 static struct pkvm_moveable_reg *moveable_regs = kvm_nvhe_sym(pkvm_moveable_regs);
 static struct memblock_region *hyp_memory = kvm_nvhe_sym(hyp_memory);
 static unsigned int *hyp_memblock_nr_ptr = &kvm_nvhe_sym(hyp_memblock_nr);
@@ -592,43 +593,47 @@ static int __init pkvm_firmware_rmem_init(struct reserved_mem *rmem)
 
 	if (!PAGE_ALIGNED(rmem->size))
 		return pkvm_firmware_rmem_err(rmem, "size is not page-aligned");
-	kvm_err("ppkvm_firmware_rmem_init %x %x\n",rmem->base,rmem->size);
 
 	*pvmfw_size = rmem->size;
 	*pvmfw_base = rmem->base;
 	pkvm_firmware_mem = rmem;
 	return 0;
 }
-RESERVEDMEM_OF_DECLARE(qq, "linux,pkvm-guest-firmware-memory",
+RESERVEDMEM_OF_DECLARE(pkvm_firmware, "linux,pkvm-guest-firmware-memory",
 		       pkvm_firmware_rmem_init);
 
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
 static int __init pkvm_g2g_share_rmem_init(struct reserved_mem *rmem)
 {
 	unsigned long node = rmem->fdt_node;
-/*
-	if (pkvm_firmware_mem)
-		return pkvm_firmware_rmem_err(rmem, "duplicate reservation");
 
-	if (!of_get_flat_dt_prop(node, "no-map", NULL))
-		return pkvm_firmware_rmem_err(rmem, "missing \"no-map\" property");
+	if (!of_get_flat_dt_prop(node, "no-map", NULL)) {
+		kvm_err("missing \"no-map\" property");
+		return -EINVAL;
+	}
+	if (of_get_flat_dt_prop(node, "reusable", NULL)) {
+		kvm_err("\"reusable\" property unsupported");
+		return -EINVAL;
+	}
 
-	if (of_get_flat_dt_prop(node, "reusable", NULL))
-		return pkvm_firmware_rmem_err(rmem, "\"reusable\" property unsupported");
-*/
-	kvm_err("pkvm_g2g_share_rmem_init %x %x\n",rmem->base,rmem->size);
-	if (!PAGE_ALIGNED(rmem->base))
-		return pkvm_firmware_rmem_err(rmem, "base is not page-aligned");
-
-	if (!PAGE_ALIGNED(rmem->size))
-		return pkvm_firmware_rmem_err(rmem, "size is not page-aligned");
+	if (!PAGE_ALIGNED(rmem->base)) {
+		kvm_err("base is not page-aligned");
+		return -EINVAL;
+	}
+	if (!PAGE_ALIGNED(rmem->size)) {
+		kvm_err("size is not page-aligned");
+		return -EINVAL;
+	}
 
 	*g2g_share_size = rmem->size;
 	*g2g_share_base = rmem->base;
-	//pkvm_firmware_mem = rmem;
+
 	return 0;
 }
-RESERVEDMEM_OF_DECLARE(pkvm_firmware, "linux,pkvm-guest-shared-memory",
+RESERVEDMEM_OF_DECLARE(pkvm_g2g_share, "linux,pkvm-guest-shared-memory",
 		       pkvm_g2g_share_rmem_init);
+
+#endif
 static int __init pkvm_firmware_rmem_clear(void)
 {
 	void *addr;
@@ -1075,14 +1080,12 @@ EXPORT_SYMBOL(__pkvm_topup_hyp_alloc_mgt_gfp);
 
 int __pkvm_topup_hyp_alloc_mgt(unsigned long id, unsigned long nr_pages, unsigned long sz_alloc)
 {
-	//kvm_err("__pkvm_topup_hyp_alloc_mgt\n");
 	return __pkvm_topup_hyp_alloc_mgt_gfp(id, nr_pages, sz_alloc, GFP_KERNEL);
 }
 EXPORT_SYMBOL(__pkvm_topup_hyp_alloc_mgt);
 
 int __pkvm_topup_hyp_alloc(unsigned long nr_pages)
 {
-	//kvm_err("__pkvm_topup_hyp_alloc\n");
 	return __pkvm_topup_hyp_alloc_mgt(HYP_ALLOC_MGT_HEAP_ID, nr_pages, PAGE_SIZE);
 }
 EXPORT_SYMBOL(__pkvm_topup_hyp_alloc);

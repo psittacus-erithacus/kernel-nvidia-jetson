@@ -4150,8 +4150,6 @@ static long kvm_vcpu_ioctl(struct file *filp,
 			struct pid *newpid;
 
 			r = kvm_arch_vcpu_run_pid_change(vcpu);
-			if (r  == -12)
-				printk("kvm_vcpu_ioctl ENOMEM");
 			if (r)
 				break;
 

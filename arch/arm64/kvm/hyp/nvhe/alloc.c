@@ -9,7 +9,6 @@
 #include <nvhe/mem_protect.h>
 #include <nvhe/mm.h>
 #include <nvhe/spinlock.h>
-#include <nvhe/hyp_print.h>
 
 #include <linux/build_bug.h>
 #include <linux/hash.h>
@@ -36,7 +35,6 @@ struct chunk_hdr {
 	u32			hash;
 	char			data __aligned(8);
 };
-extern int dbg;
 
 static u32 chunk_hash_compute(struct chunk_hdr *chunk)
 {
@@ -179,17 +177,14 @@ static int hyp_allocator_map(struct hyp_allocator *allocator,
 	if (!PAGE_ALIGNED(va) || !PAGE_ALIGNED(size))
 		return -EINVAL;
 
-	if (va_end < va || va_end > (allocator->start + allocator->size)) {
-		//hyp_print("hyp_allocator_map() E2BIG\n");
+	if (va_end < va || va_end > (allocator->start + allocator->size))
 		return -E2BIG;
-	}
-	//hyp_print("hyp_allocator_map0 nr_pages %ld\n",mc->nr_pages);
+
 	if (mc->nr_pages < (size >> PAGE_SHIFT)) {
 		u8 *missing_donations = this_cpu_ptr(&hyp_allocator_missing_donations);
 		u32 delta = (size >> PAGE_SHIFT) - mc->nr_pages;
 
 		*missing_donations = (u8)min(delta, (u32)~((u8)0));
-		//hyp_print("hyp_allocator_map() ENOMEM pages %ld delta %d\n", mc->nr_pages, delta);
 
 		return -ENOMEM;
 	}
@@ -205,14 +200,10 @@ static int hyp_allocator_map(struct hyp_allocator *allocator,
 		ret = __hyp_allocator_map(va, hyp_virt_to_phys(page));
 		if (ret) {
 			push_hyp_memcache(mc, page, hyp_virt_to_phys, 0);
-			//hyp_print("hyp_allocator_map() push\n");
-
 			break;
 		}
 		va += PAGE_SIZE;
 		nr_pages++;
-		//hyp_print("hyp_allocator_map()  nr_pages %x\n",nr_pages);
-
 	}
 
 	if (ret && nr_pages) {
@@ -285,12 +276,11 @@ static size_t chunk_needs_mapping(struct chunk_hdr *chunk, size_t size)
 {
 	size_t mapping_missing, mapping_needs = chunk_size(size);
 
-	//hyp_print("need %llx size: %llx\n", mapping_needs,  chunk->mapped_size);
 	if (mapping_needs <= chunk->mapped_size)
 		return 0;
 
 	mapping_missing = PAGE_ALIGN(mapping_needs - chunk->mapped_size);
-	//hyp_print("mapping missing %llx\n",mapping_missing);
+
 	return mapping_missing;
 }
 
@@ -348,11 +338,9 @@ static int chunk_inc_map(struct chunk_hdr *chunk, size_t map_size,
 			 struct hyp_allocator *allocator)
 {
 	int ret;
-	//hyp_print("chunk_inc_map %llx\n",map_size);
-	if (chunk_unmapped_size(chunk, allocator) < map_size) {
-		//hyp_print("chunk_unmapped_size %llx %llx\n", chunk_unmapped_size(chunk, allocator), map_size);
+
+	if (chunk_unmapped_size(chunk, allocator) < map_size)
 		return -EINVAL;
-	}
 
 	ret = hyp_allocator_map(allocator, chunk_unmapped_region(chunk),
 				map_size);
@@ -442,7 +430,7 @@ static int chunk_recycle(struct chunk_hdr *chunk, size_t size,
 	size_t missing_map, expected_mapping = size;
 	struct chunk_hdr *new_chunk = NULL;
 	int ret;
-	//hyp_print("chunk_recycle\n");
+
 	new_chunk_addr = chunk_addr_fixup(new_chunk_addr);
 	if (chunk_can_split(chunk, new_chunk_addr, allocator)) {
 		new_chunk = (struct chunk_hdr *)new_chunk_addr;
@@ -560,11 +548,6 @@ get_free_chunk(struct hyp_allocator *allocator, size_t size)
 
 	return chunk_get(best_chunk);
 }
-int xxx = 1;
-void foo(void)
-{
-	while(xxx);
-}
 
 void *hyp_alloc(size_t size)
 {
@@ -572,27 +555,22 @@ void *hyp_alloc(size_t size)
 	struct chunk_hdr *chunk, *last_chunk;
 	unsigned long chunk_addr;
 	int missing_map, ret = 0;
-//	foo();
+
 	size = ALIGN(size, MIN_ALLOC);
-	//hyp_print("hyp_alloc %x\n",size);
-	//hyp_print("hyp_alloc %llx\n",allocator);
+
 	hyp_spin_lock(&allocator->lock);
 
 	if (list_empty(&hyp_allocator.chunks)) {
-	//	if (dbg) hyp_print("list empty\n");
 		ret = setup_first_chunk(allocator, size);
-		if (ret) {
-			//hyp_print("setup_first_chunk ret %d\n",ret);
+		if (ret)
 			goto end;
-		}
+
 		chunk = (struct chunk_hdr *)allocator->start;
 		goto end;
 	}
 
 	chunk = get_free_chunk(allocator, size);
-
 	if (chunk) {
-	//	if (dbg) hyp_print("chunk = 0\n");
 		ret = chunk_recycle(chunk, size, allocator);
 		goto end;
 	}
@@ -608,19 +586,14 @@ void *hyp_alloc(size_t size)
 						(unsigned long)chunk_data(last_chunk));
 	if (missing_map) {
 		ret = chunk_inc_map(last_chunk, missing_map, allocator);
-		//hyp_print("missing map %d\n",ret);
-
-		if (ret) {
-			//hyp_print("chunk_inc_map ret %d\n",ret);
+		if (ret)
 			goto end;
-		}
 	}
 
 	WARN_ON(chunk_install(chunk, size, last_chunk, allocator));
 end:
 	hyp_spin_unlock(&allocator->lock);
-	//if (ret)
-	//	hyp_print("hyp_alloc errno %d\n",ret);
+
 	*(this_cpu_ptr(&hyp_allocator_errno)) = ret;
 
 	/* Enforce zeroing allocated memory */
@@ -835,14 +808,14 @@ int hyp_alloc_refill(struct kvm_hyp_memcache *host_mc)
 
 	return ret;
 }
-//int xxx = 1;
+
 int hyp_alloc_init(size_t size)
 {
 	struct hyp_allocator *allocator = &hyp_allocator;
 	int ret;
-	//while(xxx);
+
 	size = PAGE_ALIGN(size);
-	//hyp_print("hyp_alloc_init %llx\n",size);
+
 	/* constrained by chunk_hdr *_size types */
 	if (size > U32_MAX)
 		return -EINVAL;
