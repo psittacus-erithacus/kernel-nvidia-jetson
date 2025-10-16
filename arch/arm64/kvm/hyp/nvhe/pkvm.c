@@ -20,8 +20,10 @@
 #include <nvhe/pkvm.h>
 #include <nvhe/rwlock.h>
 #include <nvhe/trap_handler.h>
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
 #include <nvhe/pkvm_g2g_share.h>
 #include <nvhe/hyp_print.h>
+#endif
 /* Used by icache_is_vpipt(). */
 unsigned long __icache_flags;
 

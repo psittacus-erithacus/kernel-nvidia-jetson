@@ -33,8 +33,11 @@ struct pkvm_moveable_reg pkvm_moveable_regs[PKVM_NR_MOVEABLE_REGS];
 unsigned int pkvm_moveable_regs_nr;
 
 static struct hyp_pool host_s2_pool;
-
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
 DEFINE_PER_CPU(struct pkvm_hyp_vm *, __current_vm);
+else
+static DEFINE_PER_CPU(struct pkvm_hyp_vm *, __current_vm);
+#endif
 #define current_vm (*this_cpu_ptr(&__current_vm))
 
 static struct kvm_pgtable_pte_ops host_s2_pte_ops;
