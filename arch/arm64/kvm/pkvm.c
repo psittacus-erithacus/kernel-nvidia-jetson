@@ -508,13 +508,12 @@ static int __init finalize_pkvm(void)
 	if (pkvm_load_early_modules())
 		pkvm_firmware_rmem_clear();
 
-	/*
-	 * ret = kvm_iommu_init_driver();
+	ret = kvm_iommu_init_driver();
 	if (ret) {
 		pr_err("Failed to init KVM IOMMU driver: %d\n", ret);
 		pkvm_firmware_rmem_clear();
 	}
-	 */
+
 	/*
 	 * Exclude HYP sections from kmemleak so that they don't get peeked
 	 * at, which would end badly once inaccessible.
@@ -578,6 +577,7 @@ static int __init pkvm_firmware_rmem_err(struct reserved_mem *rmem,
 static int __init pkvm_firmware_rmem_init(struct reserved_mem *rmem)
 {
 	unsigned long node = rmem->fdt_node;
+	kvm_err("pkvm_firmware_rmem_init");
 
 	if (pkvm_firmware_mem)
 		return pkvm_firmware_rmem_err(rmem, "duplicate reservation");
@@ -606,7 +606,7 @@ RESERVEDMEM_OF_DECLARE(pkvm_firmware, "linux,pkvm-guest-firmware-memory",
 static int __init pkvm_g2g_share_rmem_init(struct reserved_mem *rmem)
 {
 	unsigned long node = rmem->fdt_node;
-
+	kvm_err("pkvm_g2g_share_rmem_init");
 	if (!of_get_flat_dt_prop(node, "no-map", NULL)) {
 		kvm_err("missing \"no-map\" property");
 		return -EINVAL;
@@ -627,6 +627,7 @@ static int __init pkvm_g2g_share_rmem_init(struct reserved_mem *rmem)
 
 	*g2g_share_size = rmem->size;
 	*g2g_share_base = rmem->base;
+	kvm_err("base %x  size %x\n",rmem->base,rmem->size);
 
 	return 0;
 }

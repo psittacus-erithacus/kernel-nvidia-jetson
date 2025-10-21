@@ -22,7 +22,9 @@
 #include <nvhe/mm.h>
 #include <nvhe/modules.h>
 #include <nvhe/pkvm.h>
-
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
+#include <nvhe/pkvm_g2g_share.h>
+#endif
 #define KVM_HOST_S2_FLAGS (KVM_PGTABLE_S2_NOFWB | \
 			   KVM_PGTABLE_S2_IDMAP | \
 			   KVM_PGTABLE_S2_PREFAULT_BLOCK)
@@ -35,7 +37,7 @@ unsigned int pkvm_moveable_regs_nr;
 static struct hyp_pool host_s2_pool;
 #ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
 DEFINE_PER_CPU(struct pkvm_hyp_vm *, __current_vm);
-else
+#else
 static DEFINE_PER_CPU(struct pkvm_hyp_vm *, __current_vm);
 #endif
 #define current_vm (*this_cpu_ptr(&__current_vm))

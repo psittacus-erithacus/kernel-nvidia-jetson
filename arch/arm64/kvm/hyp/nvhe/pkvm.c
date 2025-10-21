@@ -303,13 +303,19 @@ static void pkvm_vcpu_init_traps(struct pkvm_hyp_vcpu *hyp_vcpu)
  * Mainly for sanity checking and debugging.
  */
 #define HANDLE_OFFSET 0x1000
-
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
 unsigned int vm_handle_to_idx(pkvm_handle_t handle)
+#else
+static unsigned int vm_handle_to_idx(pkvm_handle_t handle)
+#endif
 {
 	return handle - HANDLE_OFFSET;
 }
-
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
 pkvm_handle_t idx_to_vm_handle(unsigned int idx)
+#else
+static pkvm_handle_t idx_to_vm_handle(unsigned int idx)
+#endif
 {
 	return idx + HANDLE_OFFSET;
 }
@@ -370,7 +376,11 @@ static void unmap_donated_memory_noclear(void *va, size_t size)
 /*
  * Return the hyp vm structure corresponding to the handle.
  */
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
 struct pkvm_hyp_vm *get_vm_by_handle(pkvm_handle_t handle)
+#else
+static struct pkvm_hyp_vm *get_vm_by_handle(pkvm_handle_t handle)
+#endif
 {
 	unsigned int idx = vm_handle_to_idx(handle);
 
@@ -957,7 +967,6 @@ unlock_vm:
 
 	return ret;
 }
-void pkvm_g2g_share_teardown(pkvm_handle_t handle);
 
 int __pkvm_start_teardown_vm(pkvm_handle_t handle)
 {
