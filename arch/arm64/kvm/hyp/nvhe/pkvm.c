@@ -924,6 +924,8 @@ err_unpin_kvm:
  */
 int __pkvm_init_vcpu(pkvm_handle_t handle, struct kvm_vcpu *host_vcpu)
 {
+	hyp_print("__pkvm_init_vcpu()\n");
+
 	struct pkvm_hyp_vcpu *hyp_vcpu;
 	struct pkvm_hyp_vm *hyp_vm;
 	unsigned int idx;

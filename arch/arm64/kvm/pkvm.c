@@ -505,15 +505,16 @@ static int __init finalize_pkvm(void)
 	 * Modules can play an essential part in the pKVM protection. All of
 	 * them must properly load to enable protected VMs.
 	 */
+
 	if (pkvm_load_early_modules())
 		pkvm_firmware_rmem_clear();
-
+/*
 	ret = kvm_iommu_init_driver();
 	if (ret) {
 		pr_err("Failed to init KVM IOMMU driver: %d\n", ret);
 		pkvm_firmware_rmem_clear();
 	}
-
+*/
 	/*
 	 * Exclude HYP sections from kmemleak so that they don't get peeked
 	 * at, which would end badly once inaccessible.
