@@ -182,7 +182,7 @@ static int do_g2g_map(struct pkvm_hyp_vcpu *vcpu, u64 ipa, phys_addr_t phys)
 	hyp_print("pte1 %llx lev: %d\n",ptep, level);
 	if (ptep) {
 		hyp_print("the page has already been mapped\n");
-		//return -EINVAL;
+		return -EADDRINUSE;
 	}
 
 	prot = pkvm_mkstate(KVM_PGTABLE_PROT_RW, PKVM_PAGE_SHARED_BORROWED);
@@ -202,7 +202,7 @@ bool pkvm_g2g_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 	u32 page_nr = smccc_get_arg2(vcpu);
 	u64 partner = smccc_get_arg3(vcpu);
 
-	hyp_print("guest_share  ipa:%llx part: %x handle: %x page:%x /n",
+	hyp_print("guest_share ipa:%llx part: %x handle: %x page:%x\n",
 		   ipa,partner,handle, page_nr);
 	if (handle == partner) {
 		hyp_print("cannot be shared by itself\n");
@@ -337,7 +337,6 @@ static int __pkvm_g2g_unshare(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t handle, 
 		share = &(*g2g_pool.shares)[share_id];
 		switch (get_g2g_mode(share, handle, 0, ipa)) {
 		case INITIATOR:
-			//share->initiator_handle = 0;
 			hyp_print("unshare: found initiator\n");
 			unmap_ipa = share->initiator_ipa;
 			share->initiator_ipa = 0;
@@ -362,7 +361,6 @@ static int __pkvm_g2g_unshare(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t handle, 
 			continue;
 		}
 		if (unmap_ipa) {
-			unmap_ipa = 0;
 			if (share->status == EMPTY) {
 				phys = get_share_phys(share_id);
 				memset(hyp_phys_to_virt(phys), 0, PAGE_SIZE);
@@ -374,9 +372,10 @@ static int __pkvm_g2g_unshare(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t handle, 
 			  * guest will be unmapped
 			  */
 			if (ipa) {
-				hyp_print("stop unmap\n");
+				hyp_print("stop unmapping\n");
 				break;
 			}
+			unmap_ipa = 0;
 		}
 	}
 	return ret;
