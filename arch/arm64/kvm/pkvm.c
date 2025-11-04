@@ -628,7 +628,7 @@ static int __init pkvm_g2g_share_rmem_init(struct reserved_mem *rmem)
 
 	*g2g_share_size = rmem->size;
 	*g2g_share_base = rmem->base;
-	kvm_err("base %x  size %x\n",rmem->base,rmem->size);
+	kvm_err("g2g base %x  size %x\n",rmem->base,rmem->size);
 
 	return 0;
 }

@@ -111,7 +111,7 @@ config PKVM_GUEST_TO_GUEST_SHARE
 	default n
 	help
 	  Say Y here if you want to allow guests to share memory with each other.
-	  Pkvm can give guests memory to share from a memory area allocated from 
+	  Pkvm can give guests memory to share from a memory area allocated from
 	  the host.
 	  The itself host cannot access to  this area.
 

@@ -11,6 +11,13 @@
 #include <asm/kvm_pgtable.h>
 #include <asm/stage2_pgtable.h>
 
+#include <nvhe/hyp_print.h>
+__attribute__((weak)) int dbg = 0;
+__attribute__((weak)) int hyp_print(const char *fmt, ...)
+{
+ return 0;
+}
+
 
 #define KVM_PTE_LEAF_ATTR_S2_PERMS	(KVM_PTE_LEAF_ATTR_LO_S2_S2AP_R | \
 					 KVM_PTE_LEAF_ATTR_LO_S2_S2AP_W | \
@@ -983,14 +990,18 @@ static int stage2_map_walk_table_pre(const struct kvm_pgtable_visit_ctx *ctx,
 	kvm_pte_t *childp = kvm_pte_follow(ctx->old, mm_ops);
 	int ret;
 
+	if (dbg) hyp_print("pre1\n");
 	if (!stage2_leaf_mapping_allowed(ctx, data))
 		return 0;
+	if (dbg) hyp_print("pre2\n");
 
 	ret = stage2_map_walker_try_leaf(ctx, data);
+	if (dbg) hyp_print("pre3\n");
 	if (ret)
 		return ret;
 
 	mm_ops->free_unlinked_table(childp, ctx->level);
+	if (dbg) hyp_print("pre4\n");
 	return 0;
 }
 
@@ -1041,8 +1052,10 @@ static int stage2_map_walk_leaf(const struct kvm_pgtable_visit_ctx *ctx,
 	struct kvm_pgtable_pte_ops *pte_ops = pgt->pte_ops;
 	kvm_pte_t *childp, new;
 	int ret;
+	if (dbg) hyp_print("map1 %llx\n",data);
 
 	ret = stage2_map_walker_try_leaf(ctx, data);
+	if (dbg) hyp_print("map2 %d\n",ret);
 	if (ret != -E2BIG)
 		return ret;
 
@@ -1052,7 +1065,9 @@ static int stage2_map_walk_leaf(const struct kvm_pgtable_visit_ctx *ctx,
 	if (!data->memcache)
 		return -ENOMEM;
 
+	if (dbg) hyp_print("map3 %llx %llx\n",data->memcache,  mm_ops->zalloc_page);
 	childp = mm_ops->zalloc_page(data->memcache);
+	if (dbg) hyp_print("map4 %llx\n",childp);
 	if (!childp)
 		return -ENOMEM;
 

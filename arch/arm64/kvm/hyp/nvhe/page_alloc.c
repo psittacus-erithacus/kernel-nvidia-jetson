@@ -196,15 +196,15 @@ void hyp_split_page(struct hyp_page *p)
 		hyp_set_page_refcounted(tail);
 	}
 }
-
+#include <nvhe/hyp_print.h>
+extern int dbg;
 void *hyp_alloc_pages(struct hyp_pool *pool, u8 order)
 {
 	struct hyp_page *p;
 	u8 i = order;
 	u64 free_pages;
-
 	hyp_spin_lock(&pool->lock);
-
+	if (dbg) hyp_print("hyp_alloc_pages\n");
 	/* Look for a high-enough-order page */
 	while (i <= pool->max_order && list_empty(&pool->free_area[i]))
 		i++;
@@ -212,12 +212,14 @@ void *hyp_alloc_pages(struct hyp_pool *pool, u8 order)
 		hyp_spin_unlock(&pool->lock);
 		return NULL;
 	}
+	if (dbg) hyp_print("hyp_alloc_pages2\n");
 
 	/* Extract it from the tree at the right order */
 	p = node_to_page(pool->free_area[i].next);
 	p = __hyp_extract_page(pool, p, order);
 
 	hyp_set_page_refcounted(p);
+	if (dbg) hyp_print("hyp_alloc_pages3\n");
 
 	free_pages = pool->free_pages - (1 << p->order);
 	WRITE_ONCE(pool->free_pages, free_pages);

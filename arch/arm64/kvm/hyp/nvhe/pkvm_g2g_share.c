@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
 #include <linux/kvm_host.h>
 #include <nvhe/pkvm.h>
 #include <kvm/arm_hypercalls.h>
@@ -13,6 +15,8 @@ extern DEFINE_PER_CPU(struct pkvm_hyp_vm *, __current_vm);
 
 #define MAX_GUEST_SHARE_COUNT 256
 #define current_vm (*this_cpu_ptr(&__current_vm))
+/* test whether an address (unsigned long or pointer) is aligned to PAGE_SIZE */
+#define PAGE_ALIGNED(addr) IS_ALIGNED((unsigned long)(addr), PAGE_SIZE)
 
 unsigned int vm_handle_to_idx(pkvm_handle_t handle);
 pkvm_handle_t idx_to_vm_handle(unsigned int idx);
@@ -32,8 +36,18 @@ struct g2g_share {
 };
 
 struct g2g_pool {
+	/*The size of the struct g2g_share array depends on how many pages from
+	 * the host are reserved for guest to guest sharing. Each page needs one
+	 * g2g_share structure.
+	 */
 	struct g2g_share (*shares)[];
+	/* number of pages reserved for sharing */
 	u32 nr_pages;
+	/* memory allocated for g2g sharing. guests' IPA addresses are s2-mapped
+	* here.
+	* Please note that the actual number of pages to be shared will be
+	* slightly less than the number allocated by the host.
+	*/
 	void  *shared_mem;
 };
 
@@ -61,25 +75,14 @@ static void host_unlock_component(void)
 	hyp_spin_unlock(&host_mmu.lock);
 }
 
-/* shares table
- * header:
- * g2g_pool.shares[0] -> struct g2g_share[0]
- * g2g_pool.shares[1] -> struct g2g_share[1]
- * ...
- * g2g_pool.shares[n] -> struct g2g_share[n]
- *
- * 4k-aligmented
- * physical shared pages:
- *  g2g_pool.shared_mem points the first address of it
- * n * 4k pages
- */
 int pkvm_init_g2g_pool(void)
 {
 	int hdr_pages;
-
-	hyp_print("pkvm_init_g2g_pool2\n");
-	void *p = hyp_phys_to_virt(g2g_share_base);
-	int total_pages = g2g_share_size / 4096;
+	void *base = hyp_phys_to_virt(g2g_share_base);
+	int total_pages = g2g_share_size / PAGE_SIZE;
+	hyp_print("bufsize %x\n",g2g_share_size);
+	if (!PAGE_ALIGNED(g2g_share_base) || !PAGE_ALIGNED(g2g_share_size))
+		return -EINVAL;
 
 	hdr_pages = DIV_ROUND_UP(sizeof(struct g2g_share) * total_pages +
 				 sizeof(u32), PAGE_SIZE);
@@ -88,17 +91,18 @@ int pkvm_init_g2g_pool(void)
 	if (hdr_pages >= total_pages)
 		return -EINVAL;
 
-	memset((void *) p, 0, g2g_share_size);
-	g2g_pool.shares = (struct g2g_share(*)[]) p;
+	memset((void *) base, 0, g2g_share_size);
+	g2g_pool.shares = (struct g2g_share(*)[]) base;
 	g2g_pool.nr_pages = total_pages - hdr_pages;
-	g2g_pool.shared_mem = (void *) p + hdr_pages * PAGE_SIZE;
+	g2g_pool.shared_mem = (void *) base + hdr_pages * PAGE_SIZE;
 
 	hyp_print("mem pages %d\n",g2g_pool.nr_pages);
 	hyp_print("share: %llx mem %llx\n",g2g_pool.shares, g2g_pool.shared_mem);
 	return 0;
 }
 
-static phys_addr_t get_share_phys(int id) {
+static phys_addr_t get_share_phys(int id)
+{
 	return hyp_virt_to_phys(g2g_pool.shared_mem + PAGE_SIZE * id);
 }
 
@@ -108,15 +112,17 @@ int get_new_share(void)
 	struct g2g_share *share;
 
 	if (!g2g_pool.shares)
-		pkvm_init_g2g_pool();
+		if (pkvm_init_g2g_pool())
+			return -EINVAL;
+
 	for (i = 0; i < g2g_pool.nr_pages; i++) {
 		share = &(*g2g_pool.shares)[i];
 		if (share->status == EMPTY) {
-			hyp_print("get_new %d\n",i);
+//			hyp_print("get_new %d\n",i);
 			return i;
 		}
 	}
-	return -1;
+	return -EINVAL;
 }
 
 enum share_mode get_g2g_mode(struct g2g_share *share,
@@ -139,10 +145,10 @@ enum share_mode get_g2g_mode(struct g2g_share *share,
 
 pkvm_handle_t find_next_g2g_share(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t partner)
 {
-	struct g2g_share *share;// = g2g_shares;
+	struct g2g_share *share;
 	pkvm_handle_t handle = hyp_vm->kvm.arch.pkvm.handle;
 	int idx;
-	int share_id ;
+	int share_id;
 	int start;
 
 	if  (partner == 0)
@@ -164,29 +170,116 @@ pkvm_handle_t find_next_g2g_share(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t part
 
 	return 0;
 }
+struct pkvm_mem_transition {
+	u64				nr_pages;
 
+	struct {
+		enum pkvm_component_id	id;
+		/* Address in the initiator's address space */
+		u64			addr;
+
+		union {
+			struct {
+				/* Address in the completer's address space */
+				u64	completer_addr;
+			} host;
+			struct {
+				u64	completer_addr;
+			} hyp;
+			struct {
+				struct pkvm_hyp_vm *hyp_vm;
+				struct kvm_hyp_memcache *mc;
+			} guest;
+		};
+	} initiator;
+
+	struct {
+		enum pkvm_component_id	id;
+
+		union {
+			struct {
+				struct pkvm_hyp_vm *hyp_vm;
+				struct kvm_hyp_memcache *mc;
+				phys_addr_t phys;
+			} guest;
+		};
+
+		const enum kvm_pgtable_prot		prot;
+	} completer;
+};
+
+struct pkvm_checked_mem_transition {
+	const struct pkvm_mem_transition	*tx;
+	u64					completer_addr;
+
+	/* Number of physically contiguous pages */
+	u64					nr_pages;
+};
+int dbg = 0;
+
+unsigned long tmp = 0x1000;
+int guest_request_share(struct pkvm_checked_mem_transition *checked_tx);
 static int do_g2g_map(struct pkvm_hyp_vcpu *vcpu, u64 ipa, phys_addr_t phys)
 {
 	struct kvm_hyp_memcache *mc = &vcpu->vcpu.arch.stage2_mc;
 	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(vcpu);
-	kvm_pte_t ptep;
+	struct pkvm_mem_transition share = {
+		.nr_pages	= 1,
+		.initiator	= {
+			.id	= PKVM_ID_GUEST,
+			.addr	= ipa,
+			.guest	= {
+				.hyp_vm = vm,
+				.mc = &vcpu->vcpu.arch.stage2_mc,
+			},
+		},
+		.completer	= {
+			.id	= PKVM_ID_HOST,
+			.prot = PKVM_HOST_MEM_PROT,
+		},
+	};
+
+	struct pkvm_checked_mem_transition checked_tx = {
+		.tx		= &share,
+		.nr_pages	= 0,
+	};
+
+	kvm_pte_t ptep = 0xff;
 	enum kvm_pgtable_prot prot;
-	u32 level;
-
-	hyp_print("do_share ipa:%llx -> phys. %llx\n",ipa,  phys);
-	if (kvm_pgtable_get_leaf(&vm->pgt, ipa, &ptep, &level)) {
-		hyp_print("ERR: cannot read mapping status\n");
-		return -EINVAL;
+	u32 level =0xff;
+	int ret;
+	ret = kvm_pgtable_get_leaf(&vm->pgt, ipa, &ptep, &level);
+	//hyp_print("do_share ipa:%llx -> phys. %llx\n",ipa,  phys);
+	if (ret) {
+		hyp_print("ERR: cannot read mapping status %x\n",ret);
+		//return -EINVAL;
 	}
+	//ret = guest_request_share(&checked_tx);
+	//hyp_print("request share ret: %x (%d)\n",ret, ret);
+	guest_lock_component(vm);
 
-	hyp_print("pte1 %llx lev: %d\n",ptep, level);
-	if (ptep) {
+	if (ptep || (level != 3)){
+		hyp_print("pte1 %llx lev: %d\n",ptep, level);
 		hyp_print("the page has already been mapped\n");
-		return -EADDRINUSE;
+		//return -EADDRINUSE;
+	}
+	//dbg = 1;
+	if (tmp != mc->nr_pages) {
+		hyp_print("mc changed %llx %lx %lx\n",mc->head, mc->flags,mc->nr_pages);
+		tmp = mc->nr_pages;
 	}
 
 	prot = pkvm_mkstate(KVM_PGTABLE_PROT_RW, PKVM_PAGE_SHARED_BORROWED);
-	return kvm_pgtable_stage2_map(&vm->pgt, ipa, PAGE_SIZE, phys, prot, mc, 0);
+//	hyp_print("mc %llx %lx %lx\n",mc->head, mc->flags,mc->nr_pages);
+//	hyp_print("prot %x\n",prot);
+	ret = kvm_pgtable_stage2_map(&vm->pgt, ipa, PAGE_SIZE, phys, prot, mc, 0);
+//	hyp_print("mc %llx %lx %lx\n",mc->head, mc->flags,mc->nr_pages);
+
+	guest_unlock_component(vm);
+
+	if (ret)
+		hyp_print("kvm_pgtable_stage2_map ret %x (%d)\n",ret,ret);
+	return  ret;
 }
 
 bool pkvm_g2g_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
@@ -202,8 +295,8 @@ bool pkvm_g2g_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 	u32 page_nr = smccc_get_arg2(vcpu);
 	u64 partner = smccc_get_arg3(vcpu);
 
-	hyp_print("guest_share ipa:%llx part: %x handle: %x page:%x\n",
-		   ipa,partner,handle, page_nr);
+//	hyp_print("guest_share ipa:%llx part: %x handle: %x page:%x\n",
+//		   ipa,partner,handle, page_nr);
 	if (handle == partner) {
 		hyp_print("cannot be shared by itself\n");
 		ret = EINVAL;
@@ -211,43 +304,44 @@ bool pkvm_g2g_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 
 	}
 
-	/* look for an existing sharing request for this guest */
+	/* look for an existing share request for this guest */
 	for (share_id = 0; share_id < g2g_pool.nr_pages; share_id++) {
 		share = &(*g2g_pool.shares)[share_id];
 
 		if (get_g2g_mode(share, handle, partner, 0) == NONE)
 			continue;
+
 		if ((share->status == INITIATED) && share->page_nr == page_nr) {
-			hyp_print("complete share %d phys:%llx\n",share_id, get_share_phys(share_id));
-			if (!do_g2g_map(hyp_vcpu, ipa, get_share_phys(share_id))) {
+//			hyp_print("complete share %d phys:%llx\n",share_id, get_share_phys(share_id));
+			ret = do_g2g_map(hyp_vcpu, ipa, get_share_phys(share_id));
+			if (!ret) {
 				share->completer_ipa = ipa;
 				share->status = COMPLETED;
 				share_completed = true;
-				hyp_print("pkvm_g2g_share_complete OK\n");
-			} else {
-				ret = EINVAL;
 			}
+			/* share complete */
 			goto out;
 		}
 	}
 
+	/* No share request for this quest found, create it */
 	share_id = get_new_share();
 	if (share_id < 0) {
+		hyp_print("get_new_share() fails\n");
 		ret = -EINVAL;
 		goto out;
 	}
 
-	hyp_print("initiate share %d phys:%llx\n",share_id, get_share_phys(share_id));
-	if (!do_g2g_map(hyp_vcpu, ipa, get_share_phys(share_id))) {
+//	hyp_print("initiate share %d phys:%llx\n",share_id, get_share_phys(share_id));
+	ret = do_g2g_map(hyp_vcpu, ipa, get_share_phys(share_id));
+	if (!ret) {
 		share = &(*g2g_pool.shares)[share_id];
 		share->completer_handle = partner;
 		share->page_nr = page_nr;
 		share->initiator_handle = handle;
 		share->initiator_ipa = ipa;
 		share->status = INITIATED;
-
-	} else
-		ret = EINVAL;
+	}
 
 out:
 	smccc_set_retval(vcpu, ret, share_completed, 0, 0);
@@ -324,7 +418,8 @@ int do_pkvm_g2g_unmap(struct pkvm_hyp_vm *vm, u64 ipa)
 	return ret;
 }
 
-static int __pkvm_g2g_unshare(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t handle, pkvm_handle_t partner, u64 ipa)
+static int __pkvm_g2g_unshare(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t handle,
+			      pkvm_handle_t partner, u64 ipa)
 {
 	struct g2g_share *share;
 	u64 unmap_ipa = 0;
@@ -348,7 +443,6 @@ static int __pkvm_g2g_unshare(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t handle, 
 			break;
 
 		case COMPLETER:
-			//share->completer_handle = 0;
 			hyp_print("unshare: found completer\n");
 			unmap_ipa = share->completer_ipa;
 			share->completer_ipa = 0;
@@ -367,12 +461,12 @@ static int __pkvm_g2g_unshare(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t handle, 
 			}
 			hyp_print("unmap ipa %lx %x\n", unmap_ipa, handle);
 			ret = do_pkvm_g2g_unmap(hyp_vm, unmap_ipa);
-			 /* if an IPA address is given, only that address will
-			  * be unmapped, otherwise all addresses shared by the
-			  * guest will be unmapped
-			  */
+			/* What we can do if unmap fails */
 			if (ipa) {
-				hyp_print("stop unmapping\n");
+				/* if an IPA address is given, only that address
+				 * will be unmapped, otherwise all addresses
+				 * shared by the guest will be unmapped
+				 */
 				break;
 			}
 			unmap_ipa = 0;
@@ -393,14 +487,14 @@ bool pkvm_g2g_unshare(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 
 	ret = __pkvm_g2g_unshare(hyp_vm, handle, partner, ipa);
 
-	smccc_set_retval(vcpu,ret, 0, 0, 0);
+	smccc_set_retval(vcpu, ret, 0, 0, 0);
 
 	return true;
-
 }
 
 void pkvm_g2g_share_teardown(pkvm_handle_t handle)
 {
 	struct pkvm_hyp_vm *hyp_vm = get_vm_by_handle(handle);
+
 	__pkvm_g2g_unshare(hyp_vm, handle, 0, 0);
 }

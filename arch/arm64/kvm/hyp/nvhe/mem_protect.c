@@ -25,6 +25,8 @@
 #ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
 #include <nvhe/pkvm_g2g_share.h>
 #endif
+#include <nvhe/hyp_print.h>
+
 #define KVM_HOST_S2_FLAGS (KVM_PGTABLE_S2_NOFWB | \
 			   KVM_PGTABLE_S2_IDMAP | \
 			   KVM_PGTABLE_S2_PREFAULT_BLOCK)
@@ -54,24 +56,23 @@ static struct kvm_pgtable_pte_ops guest_s2_pte_ops = {
 	.pte_is_counted_cb = guest_stage2_pte_is_counted
 };
 
-static void guest_lock_component(struct pkvm_hyp_vm *vm)
+void guest_lock_component(struct pkvm_hyp_vm *vm)
 {
 	hyp_spin_lock(&vm->pgtable_lock);
 	current_vm = vm;
 }
 
-static void guest_unlock_component(struct pkvm_hyp_vm *vm)
+void guest_unlock_component(struct pkvm_hyp_vm *vm)
 {
 	current_vm = NULL;
 	hyp_spin_unlock(&vm->pgtable_lock);
 }
-
-static void host_lock_component(void)
+void host_lock_component(void)
 {
 	hyp_spin_lock(&host_mmu.lock);
 }
 
-static void host_unlock_component(void)
+void host_unlock_component(void)
 {
 	hyp_spin_unlock(&host_mmu.lock);
 }
@@ -1544,8 +1545,11 @@ static int guest_request_walker(const struct kvm_pgtable_visit_ctx *ctx,
 	phys_addr_t phys;
 
 	state = guest_get_page_state(pte, 0);
-	if (data->desired_state != (state & data->desired_mask))
+	if (data->desired_state != (state & data->desired_mask)) {
+		hyp_print("ret dd %x st %x dsm %x\n",data->desired_state, state,  data->desired_mask);
 		return (state & PKVM_NOPAGE) ? -EFAULT : -EINVAL;
+	}
+	hyp_print("ddata %x st %x dsm %x\n",data->desired_state, state,  data->desired_mask);
 
 	if (state & PKVM_NOPAGE) {
 		phys = PHYS_ADDR_MAX;
@@ -1605,6 +1609,7 @@ static int __guest_request_page_transition(struct pkvm_checked_mem_transition *c
 	 */
 	phys_offset = tx->initiator.addr - data.ipa_start;
 	if (phys_offset || (tx->nr_pages * PAGE_SIZE < data.size)) {
+		hyp_print("rx req %x, res %x",tx->nr_pages * PAGE_SIZE, data.size);
 		struct pkvm_hyp_vcpu *hyp_vcpu = pkvm_get_loaded_hyp_vcpu();
 		int min_pages;
 
@@ -1612,8 +1617,12 @@ static int __guest_request_page_transition(struct pkvm_checked_mem_transition *c
 			return -EINVAL;
 
 		min_pages = kvm_mmu_cache_min_pages(hyp_vcpu->vcpu.kvm);
-		if (hyp_vcpu->vcpu.arch.stage2_mc.nr_pages < min_pages)
+		if (hyp_vcpu->vcpu.arch.stage2_mc.nr_pages < min_pages) {
+			hyp_print("enomem %x %x\n",
+					hyp_vcpu->vcpu.arch.stage2_mc.nr_pages,
+					min_pages);
 			return -ENOMEM;
+		}
 	}
 
 	checked_tx->completer_addr = data.phys_start + phys_offset;
@@ -1625,7 +1634,7 @@ static int __guest_request_page_transition(struct pkvm_checked_mem_transition *c
 	return 0;
 }
 
-static int guest_request_share(struct pkvm_checked_mem_transition *checked_tx)
+int guest_request_share(struct pkvm_checked_mem_transition *checked_tx)
 {
 	return __guest_request_page_transition(checked_tx, PKVM_PAGE_OWNED);
 }
