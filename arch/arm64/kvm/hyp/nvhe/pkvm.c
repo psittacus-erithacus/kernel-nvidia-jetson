@@ -1446,8 +1446,9 @@ static bool pkvm_handle_psci(struct pkvm_hyp_vcpu *hyp_vcpu)
 
 	return pvm_psci_not_supported(hyp_vcpu);
 }
+extern int dbg;
 
-static int pkvm_handle_empty_memcache(struct pkvm_hyp_vcpu *hyp_vcpu,
+int pkvm_handle_empty_memcache(struct pkvm_hyp_vcpu *hyp_vcpu,
 				      u64 *exit_code)
 {
 	struct kvm_hyp_req *req;
@@ -1458,6 +1459,7 @@ static int pkvm_handle_empty_memcache(struct pkvm_hyp_vcpu *hyp_vcpu,
 
 	req->mem.dest = REQ_MEM_DEST_VCPU_MEMCACHE;
 	req->mem.nr_pages = kvm_mmu_cache_min_pages(hyp_vcpu->vcpu.kvm);
+//	if (dbg) hyp_print("(%d) pkvm_handle_empty_memcache() nr_pages %d\n",dbg, req->mem.nr_pages);
 
 	write_sysreg_el2(read_sysreg_el2(SYS_ELR) - 4, SYS_ELR);
 
@@ -1477,6 +1479,7 @@ static bool pkvm_memshare_call(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 	u64 nr_shared;
 	int err;
 
+	dbg = 2;
 	/* Legacy guests have arg2 set to 0 */
 	if (nr_pages == 0)
 		nr_pages = 1;
@@ -1491,8 +1494,10 @@ static bool pkvm_memshare_call(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 			     &hyp_vm->host_kvm->stat.protected_shared_mem);
 		smccc_set_retval(vcpu, SMCCC_RET_SUCCESS, nr_shared, 0, 0);
 
+		dbg = 0;
 		return true;
 	case -EFAULT:
+		//hyp_print("errno EFAULT\n");
 		req = pkvm_hyp_req_reserve(hyp_vcpu, KVM_HYP_REQ_TYPE_MAP);
 		if (!req)
 			goto out_guest_err;
@@ -1506,6 +1511,7 @@ static bool pkvm_memshare_call(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 		 */
 		fallthrough;
 	case -ENOMEM:
+		//hyp_print("errno ENOMEM\n");
 		if (pkvm_handle_empty_memcache(hyp_vcpu, exit_code))
 			goto out_guest_err;
 
@@ -1514,12 +1520,12 @@ static bool pkvm_memshare_call(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 
 out_guest_err:
 	smccc_set_retval(vcpu, SMCCC_RET_INVALID_PARAMETER, 0, 0, 0);
+	dbg = 0;
 	return true;
 
 out_host:
 	return false;
 }
-
 static bool pkvm_memunshare_call(struct pkvm_hyp_vcpu *hyp_vcpu)
 {
 	struct pkvm_hyp_vm *hyp_vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
@@ -1529,7 +1535,7 @@ static bool pkvm_memunshare_call(struct pkvm_hyp_vcpu *hyp_vcpu)
 	u64 arg3 = smccc_get_arg3(vcpu);
 	u64 nr_unshared;
 	int err;
-
+//	dbg = 3;
 	/* Legacy guests have arg2 set to 0 */
 	if (nr_pages == 0)
 		nr_pages = 1;
@@ -1544,10 +1550,12 @@ static bool pkvm_memunshare_call(struct pkvm_hyp_vcpu *hyp_vcpu)
 	atomic64_add(nr_unshared * PAGE_SIZE,
 		     &hyp_vm->host_kvm->stat.protected_shared_mem);
 	smccc_set_retval(vcpu, SMCCC_RET_SUCCESS, nr_unshared, 0, 0);
+	dbg = 0;
 	return true;
 
 out_guest_err:
 	smccc_set_retval(vcpu, SMCCC_RET_INVALID_PARAMETER, 0, 0, 0);
+	dbg = 0;
 	return true;
 }
 
@@ -1747,7 +1755,7 @@ bool kvm_handle_pvm_hvc64(struct kvm_vcpu *vcpu, u64 *exit_code)
 		return pkvm_g2g_share(hyp_vcpu, exit_code);
 	case ARM_SMCCC_VENDOR_HYP_PKVM_G2G_QUERY_FUNC_ID:
 		return pkvm_g2g_share_query(hyp_vcpu, exit_code);
-	case ARM_SMCCC_VENDOR_HYP_PKVM_G2G_UNSHARE_ID:
+	case ARM_SMCCC_VENDOR_HYP_PKVM_G2G_UNSHARE_FUNC_ID:
 		return pkvm_g2g_unshare(hyp_vcpu, exit_code);
 #endif
 	case ARM_SMCCC_VENDOR_HYP_KVM_MEM_UNSHARE_FUNC_ID:

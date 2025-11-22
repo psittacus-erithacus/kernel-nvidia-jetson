@@ -1070,11 +1070,13 @@ int __pkvm_topup_hyp_alloc_mgt_gfp(unsigned long id, unsigned long nr_pages,
 	ret = topup_hyp_memcache_gfp(&mc, nr_pages, get_order(sz_alloc), gfp);
 	if (ret)
 		return ret;
-
+//	if (!mc.nr_pages) kvm_err("mc.nr_pages = 0\n");
 	ret = kvm_call_hyp_nvhe(__pkvm_hyp_alloc_mgt_refill, id,
 				mc.head, mc.nr_pages);
-	if (ret)
+	if (ret) {
+//		kvm_err("kvm_call_hyp_nvhe fail\n");
 		free_hyp_memcache(&mc);
+	}
 
 	return ret;
 }
@@ -1082,7 +1084,9 @@ EXPORT_SYMBOL(__pkvm_topup_hyp_alloc_mgt_gfp);
 
 int __pkvm_topup_hyp_alloc_mgt(unsigned long id, unsigned long nr_pages, unsigned long sz_alloc)
 {
-	return __pkvm_topup_hyp_alloc_mgt_gfp(id, nr_pages, sz_alloc, GFP_KERNEL);
+	int r = __pkvm_topup_hyp_alloc_mgt_gfp(id, nr_pages, sz_alloc, GFP_KERNEL);
+//	kvm_err("hyp_alloc_mgt_gfp() p: %d ret %x\n",nr_pages, r);
+	return r;
 }
 EXPORT_SYMBOL(__pkvm_topup_hyp_alloc_mgt);
 

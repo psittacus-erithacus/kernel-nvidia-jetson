@@ -14,6 +14,7 @@
 #include <linux/hash.h>
 #include <linux/kvm_host.h>
 #include <linux/list.h>
+#include <nvhe/hyp_print.h>
 
 #define MIN_ALLOC 8UL
 
@@ -802,8 +803,10 @@ int hyp_alloc_refill(struct kvm_hyp_memcache *host_mc)
 	struct hyp_allocator *allocator = &hyp_allocator;
 
 	hyp_spin_lock(&allocator->lock);
+//	hyp_print("hyp_alloc_refill hyp: %d host %d\n", alloc_mc->nr_pages, host_mc->nr_pages);
 	ret = refill_memcache(alloc_mc, host_mc->nr_pages + alloc_mc->nr_pages,
 			      host_mc);
+//	if (ret) hyp_print("refill_memcache fail");
 	hyp_spin_unlock(&allocator->lock);
 
 	return ret;

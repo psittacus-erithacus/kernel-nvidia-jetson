@@ -20,6 +20,7 @@
 #include <nvhe/pkvm.h>
 #include <nvhe/serial.h>
 #include <nvhe/trap_handler.h>
+#include <nvhe/hyp_print.h>
 
 unsigned long hyp_nr_cpus;
 
@@ -90,7 +91,7 @@ static int create_hyp_host_fp_mappings(void)
 
 	return 0;
 }
-
+//int dbg_ret = 0;
 static int recreate_hyp_mappings(phys_addr_t phys, unsigned long size,
 				 unsigned long *per_cpu_base,
 				 u32 hyp_va_bits)
@@ -174,6 +175,7 @@ static int recreate_hyp_mappings(phys_addr_t phys, unsigned long size,
 		end = start + g2g_share_size;
 		prot = pkvm_mkstate(PAGE_HYP, PKVM_PAGE_OWNED);
 		ret = pkvm_create_mappings(start, end, prot);
+		//dbg_ret = ret;
 	}
 #endif
 	if (ret)
@@ -197,6 +199,7 @@ static void update_nvhe_init_params(void)
 
 static void *hyp_zalloc_hyp_page(void *arg)
 {
+//	hyp_print("hyp_zalloc_hyp_page()\n");
 	return hyp_alloc_pages(&hpool, 0);
 }
 

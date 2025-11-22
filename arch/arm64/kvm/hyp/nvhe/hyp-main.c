@@ -31,7 +31,8 @@
 #include <uapi/linux/psci.h>
 
 #include "../../sys_regs.h"
-
+#include <nvhe/hyp_print.h>
+extern int  dbg;
 DEFINE_PER_CPU(struct kvm_nvhe_init_params, kvm_init_params);
 
 struct kvm_iommu_ops *kvm_iommu_ops;
@@ -148,7 +149,7 @@ void __hyp_exit(void)
 static int pkvm_refill_memcache(struct pkvm_hyp_vcpu *hyp_vcpu)
 {
 	struct kvm_vcpu *host_vcpu = hyp_vcpu->host_vcpu;
-
+	//if (dbg) hyp_print("pkvm_refill_memcache %d\n", host_vcpu->arch.stage2_mc.nr_pages);
 	return refill_memcache(&hyp_vcpu->vcpu.arch.stage2_mc,
 			       host_vcpu->arch.stage2_mc.nr_pages,
 			       &host_vcpu->arch.stage2_mc);
@@ -1476,7 +1477,7 @@ static void handle___pkvm_hyp_alloc_mgt_refill(struct kvm_cpu_context *host_ctxt
 		.head		= phys,
 		.nr_pages	= nr_pages,
 	};
-
+//	hyp_print("hyp_alloc_mgt_refill pages%d\n",nr_pages);
 	cpu_reg(host_ctxt, 1) = hyp_alloc_mgt_refill(id, &mc);
 }
 

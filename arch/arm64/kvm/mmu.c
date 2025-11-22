@@ -196,8 +196,7 @@ static void *stage2_memcache_zalloc_page(void *arg)
 {
 	struct kvm_mmu_memory_cache *mc = arg;
 	void *virt;
-	//if (dbg)
-	//hyp_print("h\n");
+//	kvm_err("stage2_memcache_zalloc_page\n");
 	/* Allocated with __GFP_ZERO, so no need to zero */
 	virt = kvm_mmu_memory_cache_alloc(mc);
 	if (virt)

@@ -435,9 +435,12 @@ static int hyp_map_walker(const struct kvm_pgtable_visit_ctx *ctx,
 		return -EINVAL;
 
 	childp = (kvm_pte_t *)mm_ops->zalloc_page(NULL);
-	if (!childp)
+	if (!childp) {
+//		if (dbg) {
+//			hyp_print("(%d),hyp_map_walker: zalloc_page =0\n",dbg);
+//		}
 		return -ENOMEM;
-
+	}
 	new = kvm_init_table_pte(childp, mm_ops);
 	mm_ops->get_page(ctx->ptep);
 	smp_store_release(ctx->ptep, new);
@@ -990,18 +993,14 @@ static int stage2_map_walk_table_pre(const struct kvm_pgtable_visit_ctx *ctx,
 	kvm_pte_t *childp = kvm_pte_follow(ctx->old, mm_ops);
 	int ret;
 
-	if (dbg) hyp_print("pre1\n");
 	if (!stage2_leaf_mapping_allowed(ctx, data))
 		return 0;
-	if (dbg) hyp_print("pre2\n");
 
 	ret = stage2_map_walker_try_leaf(ctx, data);
-	if (dbg) hyp_print("pre3\n");
 	if (ret)
 		return ret;
 
 	mm_ops->free_unlinked_table(childp, ctx->level);
-	if (dbg) hyp_print("pre4\n");
 	return 0;
 }
 
@@ -1052,10 +1051,10 @@ static int stage2_map_walk_leaf(const struct kvm_pgtable_visit_ctx *ctx,
 	struct kvm_pgtable_pte_ops *pte_ops = pgt->pte_ops;
 	kvm_pte_t *childp, new;
 	int ret;
-	if (dbg) hyp_print("map1 %llx\n",data);
+	//if (dbg) hyp_print("map1 %llx\n",data);
 
 	ret = stage2_map_walker_try_leaf(ctx, data);
-	if (dbg) hyp_print("map2 %d\n",ret);
+	//if (dbg) hyp_print("map2 %d\n",ret);
 	if (ret != -E2BIG)
 		return ret;
 
@@ -1065,12 +1064,13 @@ static int stage2_map_walk_leaf(const struct kvm_pgtable_visit_ctx *ctx,
 	if (!data->memcache)
 		return -ENOMEM;
 
-	if (dbg) hyp_print("map3 %llx %llx\n",data->memcache,  mm_ops->zalloc_page);
 	childp = mm_ops->zalloc_page(data->memcache);
-	if (dbg) hyp_print("map4 %llx\n",childp);
-	if (!childp)
+//	if (dbg) hyp_print("%d map3 %d\n",dbg, ((struct kvm_hyp_memcache*)data->memcache)->nr_pages);
+	//if (dbg) hyp_print("map4 %llx\n",childp);
+	if (!childp) {
+//		if (dbg) hyp_print("%d stage2_map_walk_leaf:zalloc_page = 0\n",dbg);
 		return -ENOMEM;
-
+	}
 	WARN_ON((pgt->flags & KVM_PGTABLE_S2_IDMAP) &&
 		pte_ops->pte_is_counted_cb(ctx->old, ctx->level));
 
@@ -1677,9 +1677,13 @@ kvm_pte_t *kvm_pgtable_stage2_create_unlinked(struct kvm_pgtable *pgt,
 		return ERR_PTR(ret);
 
 	pgtable = mm_ops->zalloc_page(mc);
-	if (!pgtable)
-		return ERR_PTR(-ENOMEM);
 
+	if (!pgtable) {
+//		if (dbg) {
+//		hyp_print("(%d),kvm_pgtable_stage2_create_unlinked: zalloc_page =0\n",dbg);
+//		}
+		return ERR_PTR(-ENOMEM);
+	}
 	ret = __kvm_pgtable_walk(&data, mm_ops, pgt->pte_ops,
 				 (kvm_pteref_t)pgtable, level + 1);
 	if (ret) {
@@ -1809,9 +1813,12 @@ int __kvm_pgtable_stage2_init(struct kvm_pgtable *pgt, struct kvm_s2_mmu *mmu,
 
 	pgd_sz = kvm_pgd_pages(ia_bits, start_level) * PAGE_SIZE;
 	pgt->pgd = (kvm_pteref_t)mm_ops->zalloc_pages_exact(pgd_sz);
-	if (!pgt->pgd)
+	if (!pgt->pgd) {
+//		if (dbg) {
+//		hyp_print("(%d),__kvm_pgtable_stage2_init:zalloc_page-exact =0\n",dbg);
+//		}
 		return -ENOMEM;
-
+	}
 	pgt->ia_bits		= ia_bits;
 	pgt->start_level	= start_level;
 	pgt->mm_ops		= mm_ops;

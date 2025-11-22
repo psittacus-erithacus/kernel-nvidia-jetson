@@ -239,20 +239,21 @@ static void guest_s2_free_pages_exact(void *addr, unsigned long size)
 	for (i = 0; i < (1 << order); i++)
 		hyp_put_page(&current_vm->pool, addr + (i * PAGE_SIZE));
 }
-
+extern int dbg;
 static void *guest_s2_zalloc_page(void *mc)
 {
 	struct hyp_page *p;
 	void *addr;
 	unsigned long order;
-
 	addr = hyp_alloc_pages(&current_vm->pool, 0);
+//	if (dbg) hyp_print("%d guest_s2_zalloc_page %p\n",dbg,addr);
 	if (addr)
 		return addr;
 
 	addr = pop_hyp_memcache(mc, hyp_phys_to_virt, &order);
 	if (!addr)
 		return addr;
+//	if (dbg) hyp_print("%d guest_s2_zalloc_page2 %p\n",dbg,addr);
 
 	WARN_ON(order);
 	memset(addr, 0, PAGE_SIZE);
@@ -1546,10 +1547,10 @@ static int guest_request_walker(const struct kvm_pgtable_visit_ctx *ctx,
 
 	state = guest_get_page_state(pte, 0);
 	if (data->desired_state != (state & data->desired_mask)) {
-		hyp_print("ret dd %x st %x dsm %x\n",data->desired_state, state,  data->desired_mask);
+		//hyp_print("ret dd %x st %x dsm %x\n",data->desired_state, state,  data->desired_mask);
 		return (state & PKVM_NOPAGE) ? -EFAULT : -EINVAL;
 	}
-	hyp_print("ddata %x st %x dsm %x\n",data->desired_state, state,  data->desired_mask);
+	//hyp_print("ddata %x st %x dsm %x\n",data->desired_state, state,  data->desired_mask);
 
 	if (state & PKVM_NOPAGE) {
 		phys = PHYS_ADDR_MAX;
