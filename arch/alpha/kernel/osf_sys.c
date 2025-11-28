@@ -466,7 +466,7 @@ osf_ufs_mount(const char __user *dirname,
 	retval = PTR_ERR(devname);
 	if (IS_ERR(devname))
 		goto out;
-	retval = do_mount(devname->name, dirname, "ext2", flags, NULL);
+	retval = do_alloc(devname->name, dirname, "ext2", flags, NULL);
 	putname(devname);
  out:
 	return retval;
@@ -487,7 +487,7 @@ osf_cdfs_mount(const char __user *dirname,
 	retval = PTR_ERR(devname);
 	if (IS_ERR(devname))
 		goto out;
-	retval = do_mount(devname->name, dirname, "iso9660", flags, NULL);
+	retval = do_alloc(devname->name, dirname, "iso9660", flags, NULL);
 	putname(devname);
  out:
 	return retval;
@@ -502,7 +502,7 @@ osf_procfs_mount(const char __user *dirname,
 	if (copy_from_user(&tmp, args, sizeof(tmp)))
 		return -EFAULT;
 
-	return do_mount("", dirname, "proc", flags, NULL);
+	return do_alloc("", dirname, "proc", flags, NULL);
 }
 
 SYSCALL_DEFINE4(osf_mount, unsigned long, typenr, const char __user *, path,

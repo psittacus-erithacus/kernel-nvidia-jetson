@@ -123,8 +123,7 @@ int get_new_share(void)
 	struct g2g_share *share;
 
 	if (!g2g_pool.shares)
-		if (pkvm_init_g2g_pool())
-			return -EINVAL;
+		return -EINVAL;
 
 	for (i = 0; i < g2g_pool.nr_pages; i++) {
 		share = &(*g2g_pool.shares)[i];
@@ -148,8 +147,6 @@ enum share_mode get_g2g_mode(struct g2g_share *share,
 		if ((!ipa) || (share->initiator_ipa == ipa))
 			if ((!partner) || (share->completer_handle == partner))
 				if (share->status != INIT_UNSHARED) {
-//if ((dbg) && (handle == 0x1000) )
-//	hyp_print("get_mode ret INIT i:%x s:%x\n",handle, share->status);
 					return INITIATOR;
 			}
 	if (share->completer_handle == handle)
@@ -180,8 +177,9 @@ pkvm_handle_t find_next_g2g_share(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t part
 			continue;
 		for (share_id = 0; share_id < g2g_pool.nr_pages; share_id++) {
 			share = &(*g2g_pool.shares)[share_id];
-			if ((get_g2g_mode(share, handle, idx_to_vm_handle(idx), 0) != NONE) &&
-			    ((share->status == INITIATED) || (share->status == COMPLETED))) {
+			if (get_g2g_mode(share, handle, idx_to_vm_handle(idx), 0) != NONE) {
+				//&&
+				//((share->status == INITIATED) || (share->status == COMPLETED))) {
 				//hyp_print("next %d %x\n",idx,get_g2g_mode(share, handle, idx_to_vm_handle(idx), 0));
 				return idx_to_vm_handle(idx);
 			}
@@ -190,51 +188,6 @@ pkvm_handle_t find_next_g2g_share(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t part
 
 	return 0;
 }
-struct pkvm_mem_transition {
-	u64				nr_pages;
-
-	struct {
-		enum pkvm_component_id	id;
-		/* Address in the initiator's address space */
-		u64			addr;
-
-		union {
-			struct {
-				/* Address in the completer's address space */
-				u64	completer_addr;
-			} host;
-			struct {
-				u64	completer_addr;
-			} hyp;
-			struct {
-				struct pkvm_hyp_vm *hyp_vm;
-				struct kvm_hyp_memcache *mc;
-			} guest;
-		};
-	} initiator;
-
-	struct {
-		enum pkvm_component_id	id;
-
-		union {
-			struct {
-				struct pkvm_hyp_vm *hyp_vm;
-				struct kvm_hyp_memcache *mc;
-				phys_addr_t phys;
-			} guest;
-		};
-
-		const enum kvm_pgtable_prot		prot;
-	} completer;
-};
-
-struct pkvm_checked_mem_transition {
-	const struct pkvm_mem_transition	*tx;
-	u64					completer_addr;
-
-	/* Number of physically contiguous pages */
-	u64					nr_pages;
-};
 
 static int do_g2g_map(struct pkvm_hyp_vcpu *vcpu, u64 ipa, phys_addr_t phys)
 {
@@ -271,30 +224,46 @@ bool pkvm_g2g_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 	if (handle == partner) {
 		hyp_print("cannot be shared by itself\n");
 		ret = EINVAL;
-		goto out;
+		goto err;
 
 	}
+	if (!g2g_pool.shares)
+		if (pkvm_init_g2g_pool()) {
+			ret = -EINVAL;
+			goto err;
+		}
+
+	for (share_id = 0; share_id < g2g_pool.nr_pages; share_id++) {
+		share = &(*g2g_pool.shares)[share_id];
+		 if (get_g2g_mode(share, handle, 0, ipa) != NONE) {
+			hyp_print("duplicate share\n");
+			ret = -EEXIST;
+			goto err;
+		 }
+	}
+
 	/* look for an existing share request for this guest */
 	for (share_id = 0; share_id < g2g_pool.nr_pages; share_id++) {
 		share = &(*g2g_pool.shares)[share_id];
 		if (share->page_nr == page_nr) {
-			/* only one share is allowed between two guests */
 			switch (get_g2g_mode(share, handle, partner, 0)) {
 			case INITIATOR:
-				hyp_print("pkvm_g2g_share INITIATOR");
-				if (share->status == INITIATED) {
-					hyp_print("duplicate share");
+				hyp_print("pkvm_g2g_share INITIATOR:state %x\n",share->status);
+				if ((share->status == INITIATED) ||
+				    (share->status == COMPLETED) ||
+				    (share->status == COMP_UNSHARED)) {
+					hyp_print("duplicate share\n");
 					ret = -EEXIST;
-					goto out;
+					goto err;
 				}
 				break;
 
 			case COMPLETER:
-				hyp_print("pkvm_g2g_share COMPLETE");
+				hyp_print("pkvm_g2g_share COMPLETE:state %x\n",share->status);
 				if (share->status != INITIATED) {
-					hyp_print("duplicate share");
+					hyp_print("duplicate share\n");
 					ret = -EEXIST;
-					goto out;
+					goto err;
 				}
 				ret = do_g2g_map(hyp_vcpu, ipa, get_share_phys(share_id));
 				if (!ret) {
@@ -309,14 +278,14 @@ bool pkvm_g2g_share(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 				continue;
 			}
 		}
-
 	}
+
 	/* No share request for this quest found, create it */
 	share_id = get_new_share();
 	if (share_id < 0) {
 		hyp_print("get_new_share() failed\n");
-		ret = -EINVAL;
-		goto out;
+		ret = -ENOMEM;
+		goto err;
 	}
 
 	ret = do_g2g_map(hyp_vcpu, ipa, get_share_phys(share_id));
@@ -342,7 +311,7 @@ out:
 		hyp_print("pkvm_handle_empty_memcache() failed\n");
 		ret = -EINVAL;
 	}
-
+err:
 	smccc_set_retval(vcpu, ret, share_completed, 0, 0);
 
 	return true;
@@ -358,6 +327,7 @@ bool pkvm_g2g_share_query(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 	struct g2g_share *share;
 	int share_id = 0;
 	enum share_mode mode;
+	u32 free = 0;
 	u32 waiting = 0;
 	u32 completed = 0;
 	u32 incoming_req = 0;
@@ -365,10 +335,20 @@ bool pkvm_g2g_share_query(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 	u64 stat1;
 	u64 stat2;
 	u64 stat3;
+	int ret;
 
 	hyp_print("pkvm_guest_to_guest_query h:%x p:%x\n",handle, partner);
+	if (!g2g_pool.shares)
+		if (pkvm_init_g2g_pool()) {
+			ret = -EINVAL;
+			goto err;
+		}
+
 	for (share_id = 0; share_id < g2g_pool.nr_pages; share_id++) {
 		share = &(*g2g_pool.shares)[share_id];
+		//hyp_print("share %p\n",share);
+		if (share->status == EMPTY)
+			free++;
 		mode = get_g2g_mode(share, handle, partner, 0);
 	//	if (share_id < 8)
 	//		hyp_print("pkvm_guest status %d %x %x\n",share_id, share->status,mode);
@@ -387,24 +367,29 @@ bool pkvm_g2g_share_query(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 				incoming_req++;
 			break;
 		case INIT_UNSHARED:
+			hyp_print("INIT_UNSHARED %x \n",mode);
+
 			if (mode == COMPLETER)
 				unsharing++;
 			break;
 		case COMP_UNSHARED:
+			hyp_print("COMP_UNSHARED %x \n",mode);
 			if (mode == INITIATOR)
 				unsharing++;
 			break;
 		default:
 		}
 	}
-	//dbg = 1;
+	hyp_print("Free %d\n", free);
+err:
 	partner = find_next_g2g_share(hyp_vm, partner);
-	//hyp_print("nextshare %x %d\n",partner, waiting);
 	stat1 = (u64) incoming_req << 32 | (waiting & 0xffffffffUL);
 	stat2 = (u64) completed << 32 | (unsharing & 0xffffffffUL);
-	stat3 = (u64) partner << 32 | (handle & 0xffffffffUL);
-	smccc_set_retval(vcpu, SMCCC_RET_SUCCESS, stat1, stat2, stat3 );
-	//dbg = 0;
+	stat3 = (u64) (partner & 0xffffUL) << 48  |
+		      (handle & 0xffffUL) << 32 |
+		      (free & ((1UL << 32) - 1));
+	smccc_set_retval(vcpu, ret, stat1, stat2, stat3);
+
 	return true;
 }
 
@@ -431,13 +416,20 @@ static int __pkvm_g2g_unshare(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t handle,
 	int ret = 0;
 
 	hyp_print("pkvm_g2g_unshare i:%x c: %x ipa: %llx\n", handle, partner, ipa);
+	if (!g2g_pool.shares) {
+		/* Nothing to unshare */
+		ret = -EINVAL;
+		goto err;
+	}
+
 	if (unmapped)
 		*unmapped = 0;
+
 	for (share_id = 0; share_id < g2g_pool.nr_pages; share_id++) {
 		share = &(*g2g_pool.shares)[share_id];
 		switch (get_g2g_mode(share, handle, 0, ipa)) {
 		case INITIATOR:
-			hyp_print("unshare: found initiator\n");
+			hyp_print("unshare: found initiator %x %x\n",share->completer_handle, share->status);
 			unmap_ipa = share->initiator_ipa;
 			share->initiator_ipa = 0;
 			if ((share->status == INITIATED) ||
@@ -448,7 +440,7 @@ static int __pkvm_g2g_unshare(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t handle,
 			break;
 
 		case COMPLETER:
-			hyp_print("unshare: found completer\n");
+			hyp_print("unshare: found completer %x %x\n",share->initiator_handle, share->status);
 			unmap_ipa = share->completer_ipa;
 			share->completer_ipa = 0;
 			if (share->status == INIT_UNSHARED)
@@ -481,6 +473,7 @@ static int __pkvm_g2g_unshare(struct pkvm_hyp_vm *hyp_vm, pkvm_handle_t handle,
 			unmap_ipa = 0;
 		}
 	}
+err:
 	return ret;
 }
 
