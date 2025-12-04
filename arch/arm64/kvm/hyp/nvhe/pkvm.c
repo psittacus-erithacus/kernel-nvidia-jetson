@@ -20,7 +20,9 @@
 #include <nvhe/pkvm.h>
 #include <nvhe/rwlock.h>
 #include <nvhe/trap_handler.h>
-
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
+#include <nvhe/pkvm_g2g_share.h>
+#endif
 /* Used by icache_is_vpipt(). */
 unsigned long __icache_flags;
 
@@ -300,13 +302,19 @@ static void pkvm_vcpu_init_traps(struct pkvm_hyp_vcpu *hyp_vcpu)
  * Mainly for sanity checking and debugging.
  */
 #define HANDLE_OFFSET 0x1000
-
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
+unsigned int vm_handle_to_idx(pkvm_handle_t handle)
+#else
 static unsigned int vm_handle_to_idx(pkvm_handle_t handle)
+#endif
 {
 	return handle - HANDLE_OFFSET;
 }
-
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
+pkvm_handle_t idx_to_vm_handle(unsigned int idx)
+#else
 static pkvm_handle_t idx_to_vm_handle(unsigned int idx)
+#endif
 {
 	return idx + HANDLE_OFFSET;
 }
@@ -367,7 +375,11 @@ static void unmap_donated_memory_noclear(void *va, size_t size)
 /*
  * Return the hyp vm structure corresponding to the handle.
  */
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
+struct pkvm_hyp_vm *get_vm_by_handle(pkvm_handle_t handle)
+#else
 static struct pkvm_hyp_vm *get_vm_by_handle(pkvm_handle_t handle)
+#endif
 {
 	unsigned int idx = vm_handle_to_idx(handle);
 
@@ -976,7 +988,9 @@ int __pkvm_start_teardown_vm(pkvm_handle_t handle)
 
 unlock:
 	hyp_write_unlock(&vm_table_lock);
-
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
+	pkvm_g2g_share_teardown(handle);
+#endif
 	return ret;
 }
 
@@ -1131,6 +1145,9 @@ void pkvm_reset_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)
 		hyp_vm->pvmfw_entry_vcpu = NULL;
 
 		/* Auto enroll MMIO guard */
+		/* the following line must be commented out for some reason
+		 * if pkvmfw is used
+		 */
 		set_bit(KVM_ARCH_FLAG_MMIO_GUARD, &hyp_vm->kvm.arch.flags);
 	}
 
@@ -1427,9 +1444,13 @@ static bool pkvm_handle_psci(struct pkvm_hyp_vcpu *hyp_vcpu)
 
 	return pvm_psci_not_supported(hyp_vcpu);
 }
-
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
+int pkvm_handle_empty_memcache(struct pkvm_hyp_vcpu *hyp_vcpu,
+				      u64 *exit_code)
+#else
 static int pkvm_handle_empty_memcache(struct pkvm_hyp_vcpu *hyp_vcpu,
 				      u64 *exit_code)
+#endif
 {
 	struct kvm_hyp_req *req;
 
@@ -1723,6 +1744,14 @@ bool kvm_handle_pvm_hvc64(struct kvm_vcpu *vcpu, u64 *exit_code)
 		return pkvm_meminfo_call(hyp_vcpu);
 	case ARM_SMCCC_VENDOR_HYP_KVM_MEM_SHARE_FUNC_ID:
 		return pkvm_memshare_call(hyp_vcpu, exit_code);
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
+	case ARM_SMCCC_VENDOR_HYP_PKVM_G2G_SHARE_FUNC_ID:
+		return pkvm_g2g_share(hyp_vcpu, exit_code);
+	case ARM_SMCCC_VENDOR_HYP_PKVM_G2G_QUERY_FUNC_ID:
+		return pkvm_g2g_share_query(hyp_vcpu, exit_code);
+	case ARM_SMCCC_VENDOR_HYP_PKVM_G2G_UNSHARE_FUNC_ID:
+		return pkvm_g2g_unshare(hyp_vcpu, exit_code);
+#endif
 	case ARM_SMCCC_VENDOR_HYP_KVM_MEM_UNSHARE_FUNC_ID:
 		return pkvm_memunshare_call(hyp_vcpu);
 	case ARM_SMCCC_VENDOR_HYP_KVM_MEM_RELINQUISH_FUNC_ID:

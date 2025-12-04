@@ -22,7 +22,9 @@
 #include <nvhe/mm.h>
 #include <nvhe/modules.h>
 #include <nvhe/pkvm.h>
-
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
+#include <nvhe/pkvm_g2g_share.h>
+#endif
 #define KVM_HOST_S2_FLAGS (KVM_PGTABLE_S2_NOFWB | \
 			   KVM_PGTABLE_S2_IDMAP | \
 			   KVM_PGTABLE_S2_PREFAULT_BLOCK)
@@ -33,8 +35,11 @@ struct pkvm_moveable_reg pkvm_moveable_regs[PKVM_NR_MOVEABLE_REGS];
 unsigned int pkvm_moveable_regs_nr;
 
 static struct hyp_pool host_s2_pool;
-
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
+DEFINE_PER_CPU(struct pkvm_hyp_vm *, __current_vm);
+#else
 static DEFINE_PER_CPU(struct pkvm_hyp_vm *, __current_vm);
+#endif
 #define current_vm (*this_cpu_ptr(&__current_vm))
 
 static struct kvm_pgtable_pte_ops host_s2_pte_ops;
@@ -49,13 +54,21 @@ static struct kvm_pgtable_pte_ops guest_s2_pte_ops = {
 	.pte_is_counted_cb = guest_stage2_pte_is_counted
 };
 
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
+void guest_lock_component(struct pkvm_hyp_vm *vm)
+#else
 static void guest_lock_component(struct pkvm_hyp_vm *vm)
+#endif
 {
 	hyp_spin_lock(&vm->pgtable_lock);
 	current_vm = vm;
 }
 
+#ifdef CONFIG_PKVM_GUEST_TO_GUEST_SHARE
+void guest_unlock_component(struct pkvm_hyp_vm *vm)
+#else
 static void guest_unlock_component(struct pkvm_hyp_vm *vm)
+#endif
 {
 	current_vm = NULL;
 	hyp_spin_unlock(&vm->pgtable_lock);
